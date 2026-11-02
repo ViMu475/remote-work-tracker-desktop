@@ -1,0 +1,8 @@
+flask
+google-generativeai
+reportlab
+python-dotenv
+pdfplumber
+pytest
+pytest-cov
+freezegun

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="rw-shutdown-token" content="{{ shutdown_token }}">
+    <title>Remote Work Quote Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --brand-color: #111827; }
+        .dark-mode { --brand-color: #2563eb; background-color: #1f2937; }
+        body.dark-mode { background-color: #1f2937 !important; }
+        .brand-color { color: var(--brand-color) !important; }
+        .over-quota { background-color: #fee2e2; box-shadow: inset 4px 0 0 #dc2626; }
+        .dark-mode .over-quota { background-color: #4a1d1d !important; box-shadow: inset 4px 0 0 #f87171 !important; }
+        .rating-good { background-color: #dcfce7; color: #166534; }
+        .rating-tight { background-color: #fef9c3; color: #854d0e; }
+        .rating-exceeded { background-color: #fee2e2; color: #991b1b; }
+        .dark-mode .rating-good { background-color: #14391f !important; color: #86efac !important; }
+        .dark-mode .rating-tight { background-color: #3d3410 !important; color: #fde68a !important; }
+        .dark-mode .rating-exceeded { background-color: #4a1d1d !important; color: #fca5a5 !important; }
+        @media print { body > *:not(#final-report-modal) { display: none !important; } #final-report-modal { position: static !important; background: none !important; } }
+        .dark-mode .brand-color { color: var(--brand-color) !important; }
+        .version-badge { background: #e5e7eb; color: var(--brand-color); padding: 4px 8px; border-radius: 9999px; font-size: 0.875rem; font-weight: 700; }
+        .dark-mode .version-badge { background: #2a2f36; color: var(--brand-color); }
+        .lang-button { background: #374151; color: white; padding: 8px 12px; border-radius: 0.75rem; font-weight: 700; }
+        .dark-mode .lang-button { background: #2a2f36; color: #e6e9ef; }
+        .dark-mode .bg-white { background-color: #141922 !important; }
+        .dark-mode .text-gray-900 { color: #e6e9ef !important; }
+        .dark-mode .text-gray-700 { color: #b6beca !important; }
+        .dark-mode .text-gray-600 { color: #9aa3b2 !important; }
+        .dark-mode .text-gray-500 { color: #8b94a5 !important; }
+        .dark-mode .bg-gray-50 { background-color: #1f2937 !important; }
+        .dark-mode .bg-gray-100 { background-color: #1a2029 !important; }
+        .dark-mode .bg-indigo-50 { background-color: #1b2034 !important; }
+        .dark-mode .bg-indigo-100 { background-color: #222a44 !important; }
+        .dark-mode .border-gray-300 { border-color: #2a2f36 !important; }
+        .dark-mode input { background-color: #1b2330 !important; color: #e6e9ef !important; }
+        .dark-mode .divide-gray-200 > * { border-color: #2a2f36 !important; }
+        .dark-mode .shadow-xl { box-shadow: 0 24px 40px -20px rgba(0, 0, 0, 0.7), 0 12px 20px -12px rgba(0, 0, 0, 0.5) !important; }
+        .dark-mode .bg-indigo-600 { background-color: #3b82f6 !important; }
+        .dark-mode .hover\:bg-indigo-700:hover { background-color: #2563eb !important; }
+        .dark-mode .text-indigo-700 { color: #c7d2fe !important; }
+        .dark-mode .text-indigo-900 { color: #e0e7ff !important; }
+        .dark-mode .border-indigo-600 { border-color: #60a5fa !important; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); }
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 2rem; border-radius: 1rem; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; }
+        .dark-mode .modal-content { background-color: #141922; }
+    </style>
+</head>
+<body class="bg-gray-50 p-4 sm:p-8 min-h-screen">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <div class="flex items-center gap-3">
+                <h1 class="text-3xl font-black text-gray-900 brand-color border-b-4 border-indigo-600 pb-2" data-i18n="app_title">
+                    Remote Work Quote Tracker
+                </h1>
+                <span class="version-badge">v{{ version }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="lang-toggle" onclick="toggleLanguage()" class="lang-button" title="Language">🇬🇧</button>
+                <button onclick="toggleDarkMode()" class="bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-xl transition" data-i18n="dark_mode">🌙 Dark Mode</button>
+                <button onclick="handleShutdown()" class="bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded-xl transition" data-i18n="shutdown_server" title="Server beenden">⏻</button>
+            </div>
+        </div>
+
+        <div id="message-box" class="p-3 mb-6 rounded-xl text-white font-bold opacity-0 transition-opacity duration-300"></div>
+
+        <div class="mb-6">
+            <div class="flex flex-wrap items-center gap-3">
+                <span class="text-sm font-semibold text-gray-700" data-i18n="export_label">Export:</span>
+                <a href="/api/export/daily_csv" title="CSV Export" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl shadow">⬇️ CSV (Monat)</a>
+                <a href="/api/report/monthly_pdf" title="PDF Monatsbericht" class="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 px-4 rounded-xl shadow">📄 PDF (Monat)</a>
+                <a href="/api/backup" title="JSON Backup" class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-xl shadow">💾 Backup</a>
+                <button type="button" id="restore-btn" onclick="document.getElementById('restore-file').click()" title="JSON Restore" class="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded-xl shadow" data-i18n="restore">♻️ Wiederherstellen</button>
+                <input type="file" id="restore-file" accept=".json,application/json" class="hidden" onchange="handleRestoreFile(this)">
+                <button onclick="document.getElementById('pdf-import-modal').classList.add('active')" class="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-4 rounded-xl shadow" data-i18n="pdf_import">📄 PDF Import</button>
+            </div>
+        </div>
+
+        <!-- PDF Import Modal -->
+        <div id="pdf-import-modal" class="modal">
+            <div class="modal-content">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4" data-i18n="pdf_import">PDF Zeitstempel Import</h2>
+                <p class="text-gray-600 mb-4" data-i18n="pdf_import_desc">Laden Sie eine PDF-Datei mit Zeitstempeln hoch. Die Arbeitszeiten werden automatisch extrahiert und zur Tageshistorie hinzugefügt.</p>
+
+                <input type="file" id="pdf-file-input" accept=".pdf" class="block w-full mb-4 p-2 border rounded-lg">
+
+                <div id="pdf-analysis-result" style="display: none;" class="mb-4 p-4 bg-gray-100 rounded-lg max-h-300px overflow-y-auto">
+                    <h3 class="font-bold mb-2">Gefundene Zeiträume:</h3>
+                    <ul id="pdf-sessions-list" class="text-sm space-y-2"></ul>
+                </div>
+
+                <div class="flex gap-2">
+                    <button onclick="handlePdfUpload()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg" data-i18n="analyze">Analysieren</button>
+                    <button onclick="closePdfModal()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg" data-i18n="cancel">Abbrechen</button>
+                </div>
+                <button onclick="handlePdfImport()" id="pdf-import-btn" style="display: none;" class="w-full mt-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg" data-i18n="import_sessions">Importieren</button>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl shadow-xl mb-8 border-t-8 border-indigo-500">
+            <h2 class="text-xl font-extrabold text-indigo-700 mb-4" data-i18n="monthly_overview">Aktuelle Monatsübersicht</h2>
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <label for="view-month-select" class="text-sm font-semibold text-gray-700" data-i18n="show_month">Monat anzeigen:</label>
+                <select id="view-month-select" onchange="handleViewMonthChange()" class="border border-gray-300 rounded-lg px-2 py-1 bg-white text-gray-900"></select>
+                <select id="view-year-select" onchange="handleViewMonthChange()" class="border border-gray-300 rounded-lg px-2 py-1 bg-white text-gray-900" aria-label="Jahr"></select>
+            </div>
+            <div class="flex justify-between items-center mb-6">
+                <p id="display-month" class="text-lg font-semibold text-gray-600"></p>
+                <button id="btn-current-month" onclick="handleViewCurrentMonth()"
+                        class="hidden bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition"
+                        data-i18n="view_current_month">
+                    → Aktueller Monat
+                </button>
+            </div>
+
+            <div class="mb-6">
+                <p class="text-sm font-medium text-gray-700 mb-2" data-i18n="rq_progress">Remote-Quote Fortschritt</p>
+                <canvas id="remote-chart" width="700" height="40" class="rounded-lg shadow-inner"></canvas>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div class="bg-indigo-50 p-3 rounded-xl">
+                    <p class="text-xs font-medium text-indigo-700 uppercase" data-i18n="soll_arbeitszeit">Soll-Arbeitszeit</p>
+                    <p id="display-soll" class="text-xl font-bold text-indigo-900">0.00h</p>
+                </div>
+                <div class="bg-indigo-100 p-3 rounded-xl">
+                    <p class="text-xs font-medium text-indigo-700 uppercase" data-i18n="max_remote">Max. Remote</p>
+                    <p id="display-max-remote" class="text-xl font-bold text-indigo-900">0.00h</p>
+                </div>
+                <div class="bg-green-50 p-3 rounded-xl">
+                    <p class="text-xs font-medium text-green-700 uppercase" data-i18n="ist_remote">Ist-Remote</p>
+                    <p id="display-ist-remote" class="text-xl font-bold text-green-900">0.00h</p>
+                </div>
+            </div>
+
+            <div class="mt-6 p-4 text-center rounded-xl shadow-inner bg-white">
+                <p class="text-sm font-medium text-gray-600 uppercase mb-1" data-i18n="remaining_remote_hours">Verbleibende Remote Stunden</p>
+                <p id="display-verbleibend" class="text-4xl font-extrabold p-3 rounded-lg text-white bg-green-600">0.00h</p>
+                <p class="text-sm font-medium text-gray-600 mt-2">
+                    <span data-i18n="current_usage_rate">Aktuelle Nutzungsquote:</span> <span id="display-aktuelle-quote" class="font-bold">0.00%</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl shadow-xl mb-8">
+            <h2 class="text-xl font-extrabold text-gray-900 mb-4 border-b pb-2" data-i18n="daily_log">Tägliches Protokoll</h2>
+
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700" data-i18n="date">Datum</label>
+                    <input type="date" id="input-date" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700" data-i18n="start">Start</label>
+                    <input type="time" id="input-start" value="08:00" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700" data-i18n="end">Ende</label>
+                    <input type="time" id="input-end" value="16:30" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700" data-i18n="pause_min">Pause (min)</label>
+                    <input type="number" id="input-pause" value="30" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700" data-i18n="remote_h">Remote (h)</label>
+                    <input type="number" id="input-remote" step="0.5" value="" placeholder="Leer = Vollständig" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button id="submit-btn" onclick="handleProtokoll()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition" data-i18n="log_worktime">Remote Work protokollieren</button>
+                <button id="cancel-edit-btn" onclick="cancelEdit()" class="hidden bg-gray-300 hover:bg-gray-400 text-gray-900 font-bold py-3 px-4 rounded-xl transition whitespace-nowrap">Abbrechen</button>
+            </div>
+            <p id="edit-mode-hint" class="mt-2 text-sm text-amber-700 font-bold hidden">Bearbeitungsmodus aktiv</p>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl shadow-xl mb-8">
+            <div class="flex justify-between items-center mb-6 border-b pb-2">
+                <h2 class="text-xl font-extrabold text-gray-900" data-i18n="day_history">Tageshistorie</h2>
+                <button onclick="handleDeleteAllEntries()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-xl transition" data-i18n="delete_all">Alle Einträge löschen</button>
+            </div>
+            <ul id="daily-record-list" class="divide-y divide-gray-200">
+                <li class="p-2 text-sm text-gray-500">Noch keine Einträge</li>
+            </ul>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-white p-6 rounded-2xl shadow-xl">
+                <h2 class="text-xl font-extrabold text-gray-900 mb-4 border-b pb-2" data-i18n="settings">Einstellungen</h2>
+
+                <label class="block text-sm font-medium text-gray-700" data-i18n="soll_arbeitszeit">Soll-Stunden/Tag</label>
+                <div class="flex space-x-2 mt-1 mb-4">
+                    <input type="number" id="input-sollstunden" min="1" max="10" step="0.5" class="block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                    <button onclick="handleSollstundenUpdate()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-xl whitespace-nowrap" data-i18n="set">Setzen</button>
+                </div>
+
+                <label class="block text-sm font-medium text-gray-700" data-i18n="indiv_quote">Individuelle Quote (%)</label>
+                <div class="flex space-x-2 mt-1">
+                    <input type="number" id="input-quote" min="40" max="60" step="10" class="block w-full rounded-lg border-gray-300 shadow-sm p-2 border">
+                    <button onclick="handleQuoteUpdate()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-xl whitespace-nowrap" data-i18n="set">Setzen</button>
+                </div>
+
+                <button onclick="handleMonthSwitch()" class="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl" data-i18n="month_switch">Monat abschließen</button>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-xl">
+                <div class="flex justify-between items-center mb-4 border-b pb-2">
+                    <h2 class="text-xl font-extrabold text-gray-900" data-i18n="history">Historie</h2>
+                    <button onclick="handleFinalReport()" id="btn-final-report" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-xl transition text-sm" data-i18n="final_report">Abschlussbericht</button>
+                    <button onclick="handleClearAllHistory()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-xl transition text-sm" data-i18n="clear_all_history">Komplette Historie löschen</button>
+                </div>
+                <ul id="history-list" class="divide-y divide-gray-200">
+                    <li class="p-2 text-sm text-gray-500">Keine Monate abgeschlossen</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div id="final-report-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto p-4" role="dialog" aria-modal="true" aria-labelledby="final-report-title">
+        <div class="bg-white max-w-3xl mx-auto my-6 p-6 rounded-2xl shadow-2xl">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 id="final-report-title" class="text-xl font-extrabold text-gray-900" data-i18n="final_report">Abschlussbericht</h2>
+                <div class="flex gap-2">
+                    <button onclick="window.print()" class="bg-gray-200 hover:bg-gray-300 text-gray-900 font-bold py-1 px-3 rounded-lg text-sm" data-i18n="print">Drucken</button>
+                    <button onclick="closeFinalReport()" id="final-report-close" class="bg-gray-700 hover:bg-gray-800 text-white font-bold py-1 px-3 rounded-lg text-sm" data-i18n="close">Schließen</button>
+                </div>
+            </div>
+            <div id="final-report-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

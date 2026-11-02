@@ -1,0 +1,3 @@
+# Everything needed to build the stand-alone executable (pyinstaller).
+-r requirements.txt
+pyinstaller>=6.0

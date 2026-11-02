@@ -1,0 +1,55 @@
+{
+  "individuelle_quote_prozent": 40.0,
+  "soll_stunden_pro_tag": 8.0,
+  "aktuelles_jahr": 2026,
+  "current_quartal": "Q1/2026",
+  "aktueller_monat": "März",
+  "dark_mode": false,
+  "language": "de",
+  "monatliche_historie": [],
+  "daily_records": {
+    "2026-03-02": [
+      {
+        "id": "1709300000000",
+        "datum": "2026-03-02",
+        "startTime": "08:00",
+        "endTime": "16:30",
+        "pauseMinutes": 30,
+        "remoteStundenHeute": 8.0,
+        "totalStundenHeute": 8.0,
+        "pauseWarning": null,
+        "source": null
+      }
+    ],
+    "2026-03-03": [
+      {
+        "id": "1709300000001",
+        "datum": "2026-03-03",
+        "startTime": "09:00",
+        "endTime": "17:30",
+        "pauseMinutes": 30,
+        "remoteStundenHeute": 0.0,
+        "totalStundenHeute": 8.0,
+        "pauseWarning": null,
+        "source": null
+      }
+    ]
+  },
+  "current_month_data": {
+    "monat": "März",
+    "jahr": 2026,
+    "soll_stunden_gesamt": 176.0,
+    "ist_remote_stunden_laufend": 8.0,
+    "ist_arbeitszeit_laufend": 16.0,
+    "max_remote_stunden": 70.4,
+    "individuelle_quote": 40.0
+  },
+  "quartal_data": {
+    "quartal_remote": 8.0,
+    "quartal_gesamt": 16.0,
+    "quartal_soll": 496.0,
+    "quartal_quote": 1.61
+  },
+  "view_month": "März",
+  "view_year": 2026
+}

@@ -1,0 +1,37 @@
+# --- Personal data (GDPR): never commit ---------------------------------------------------------
+# time statements and every other PDF, screenshots, exports and backups of real data
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.csv
+*.xlsx
+*.docx
+tests/real_statements/
+# the app's state file (your working times) and its backups
+tracker_state*.json
+remote_tracker_backup*
+daily_records_*
+# keys and local configuration
+.env
+.env.*
+.mcp.json
+.claude/
+# the project's private documentation folder (manuals, protocols; contains local paths and PDFs)
+docs/
+
+# --- Python / build output ----------------------------------------------------------------------
+venv/
+.venv/
+.venv-build/
+__pycache__/
+*.pyc
+*.egg-info
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+dist-wine/
+*.exe
+*.spec.bak

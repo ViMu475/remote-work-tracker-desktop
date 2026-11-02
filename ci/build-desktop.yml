@@ -1,0 +1,74 @@
+# GitHub Actions: builds the Linux program and the Windows EXE, tests them and uploads them as artifacts.
+#
+# To activate: copy this file to .github/workflows/build-desktop.yml
+# (a token needs the "workflow" scope to push files below .github/workflows).
+name: Build desktop apps
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      bundle_gemini:
+        description: 'Bundle the Gemini PDF fallback (larger program, sends statements to Google when used)'
+        type: boolean
+        default: false
+
+jobs:
+  privacy:
+    name: Privacy check (GDPR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: No personal data in the repository
+        run: python tools/check_privacy.py
+
+  build:
+    needs: privacy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: RemoteWorkTracker-Linux
+            program: dist/RemoteWorkTracker
+          - os: windows-latest
+            artifact: RemoteWorkTracker-Windows
+            program: dist\RemoteWorkTracker.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Run tests
+        run: python -m pytest -q -o addopts=""
+
+      - name: Build the program
+        env:
+          RW_BUNDLE_GEMINI: ${{ inputs.bundle_gemini && '1' || '0' }}
+        run: pyinstaller RemoteWorkTracker.spec --noconfirm --clean
+
+      - name: Smoke test of the built program
+        run: python tools/smoke_test.py "${{ matrix.program }}"
+
+      - name: Upload the program
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.program }}
