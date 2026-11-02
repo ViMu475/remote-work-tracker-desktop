@@ -24,7 +24,7 @@ files, CSV, state files, `.env`, archives) and on e-mail addresses, street addre
 personnel numbers and home directories of real users. It runs
 
 * in the test suite (`tests/test_repo_hygiene.py`, in a Git checkout),
-* as the first job of the GitHub Actions workflow (`ci/build-desktop.yml`) — the builds only start when it is green.
+* as the first job of the GitHub Actions workflow (`.github/workflows/build-desktop.yml`) — the builds only start when it is green.
 
 Run it yourself before every push. If it reports a file: remove it from the repository **and from the Git history** (a
 file that was once committed stays readable in old commits; rewrite the history before publishing).

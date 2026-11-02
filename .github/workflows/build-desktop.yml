@@ -1,7 +1,6 @@
 # GitHub Actions: builds the Linux program and the Windows EXE, tests them and uploads them as artifacts.
 #
-# To activate: copy this file to .github/workflows/build-desktop.yml
-# (a token needs the "workflow" scope to push files below .github/workflows).
+# Pushing this file needs a token with the "workflow" scope (gh auth refresh -s workflow).
 name: Build desktop apps
 
 on:

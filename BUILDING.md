@@ -60,12 +60,12 @@ SmartScreen may warn about an unsigned program ("More info" → "Run anyway"); s
 
 ## GitHub Actions: Linux and Windows in the cloud
 
-The workflow [`ci/build-desktop.yml`](ci/build-desktop.yml) does, on an Ubuntu and a Windows runner: privacy check →
+The workflow [`.github/workflows/build-desktop.yml`](.github/workflows/build-desktop.yml) does, on an Ubuntu and a Windows runner: privacy check →
 tests → PyInstaller → smoke test → upload of the program as an artifact (`RemoteWorkTracker-Linux`,
 `RemoteWorkTracker-Windows`).
 
-Activate it once: copy the file to `.github/workflows/build-desktop.yml` and push (a Git token needs the `workflow`
-scope for that: `gh auth refresh -s workflow`). Run it from *Actions → Build desktop apps → Run workflow*, then download
+It runs on every push and pull request to `main`. Pushing workflow files needs a Git token with the `workflow`
+scope (`gh auth refresh -s workflow`). To run it manually use *Actions → Build desktop apps → Run workflow*, then download
 the artifacts from the run page. Option "bundle_gemini" builds the larger variant with the optional Gemini PDF fallback
 (see [PRIVACY.md](PRIVACY.md); off by default).
 

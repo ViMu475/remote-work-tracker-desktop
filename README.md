@@ -75,7 +75,7 @@ tests/                       pytest suite, model-based long-run tests, browser c
 tools/                       smoke_test.py, check_privacy.py, wine/build-exe-with-wine.sh
 RemoteWorkTracker.spec       PyInstaller configuration
 build.sh, build-windows.bat  one-command builds
-ci/build-desktop.yml         GitHub Actions workflow (copy to .github/workflows/)
+.github/workflows/         GitHub Actions: Linux and Windows builds in the cloud
 ```
 
 ## License
