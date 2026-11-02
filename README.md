@@ -77,3 +77,7 @@ RemoteWorkTracker.spec       PyInstaller configuration
 build.sh, build-windows.bat  one-command builds
 ci/build-desktop.yml         GitHub Actions workflow (copy to .github/workflows/)
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
