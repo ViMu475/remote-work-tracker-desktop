@@ -5,7 +5,7 @@ computer, shows its user interface in the browser (`http://127.0.0.1:5000`) and 
 program file**: `RemoteWorkTracker` for Linux and `RemoteWorkTracker.exe` for Windows. Nothing has to be installed
 and no data leaves the computer (see [PRIVACY.md](PRIVACY.md)).
 
-Sister project (Android and iOS, Kotlin Multiplatform): [remote-quota-guard](https://github.com/ViMu475/remote-quota-guard).
+Sister project (Android and iOS, Kotlin Multiplatform): [remote-quota-iOSApp](https://github.com/ViMu475/remote-quota-iOSApp).
 
 ## How to get the program for each platform
 
