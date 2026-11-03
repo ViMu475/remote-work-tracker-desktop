@@ -52,7 +52,8 @@ class TestAnalyzeUpload:
                                       'a\u0000b.pdf', '\u00e4\u00f6\u00fc 😀.pdf', 'x' * 400 + '.pdf', '.pdf', '....pdf',
                                       'a b;rm -rf.pdf', 'NUL.pdf', 'A.PDF'])
     def test_path_tricks_in_file_name(self, client, name, tmp_path):
-        marker_dirs = [os.path.expanduser('~'), '/etc']
+        # '/etc' only exists on Linux/macOS; the home directory exists everywhere
+        marker_dirs = [d for d in (os.path.expanduser('~'), '/etc') if os.path.isdir(d)]
         before = {d: set(os.listdir(d)) for d in marker_dirs}
         resp = upload(client, b'%PDF-1.4 garbage', name=name)
         assert resp.status_code < 600 and resp.get_json() is not None
