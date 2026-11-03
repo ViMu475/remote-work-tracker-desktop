@@ -45,7 +45,8 @@ def truth(state):
     month = MONTHS.index(state['view_month']) + 1
     year = state['view_year']
     holidays = expected_holidays(year)
-    workdays = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+    special = {(12, 24): 0.0, (12, 31): 0.5}   # company rule: 24 Dec off, 31 Dec half day
+    workdays = sum(special.get((month, d), 1.0) for d in range(1, calendar.monthrange(year, month)[1] + 1)
                    if datetime.date(year, month, d).weekday() < 5
                    and datetime.date(year, month, d) not in holidays)
     target = workdays * state['soll_stunden_pro_tag']

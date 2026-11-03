@@ -75,6 +75,8 @@ def test_history_snapshot_keeps_quote_set_before_closing(fresh):
     client, path = fresh
     d = Driver(client, path, seed=3, label='quote-snapshot')
     d.set_quote(50)
+    y, mo = d.model.view
+    d.add_manual(f'{y}-{mo:02d}-02', '08:00', '16:30')    # an empty month would not be put into the history
     d.month_switch()
     assert d.get_state()['monatliche_historie'][-1]['individuelle_quote'] == 50
 

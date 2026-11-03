@@ -122,6 +122,22 @@ preparation lives elsewhere than `~/dev-tools`.
 A Wine build is a good check, but it is **not** a test on real Windows: before handing the EXE to other people also run it
 once on a Windows PC (SmartScreen, antivirus, write permission next to the file).
 
+## Rebuild the CSS
+
+The web interface uses a **local** stylesheet, `static/css/app.css` (no CDN, works offline). It is generated with the
+[Tailwind CSS](https://tailwindcss.com) command line tool (version 3.4.17) from `tailwind-input.css`
+(design tokens and components) and `tailwind.config.js` (which files are scanned for class names). Only the
+generated file is part of the program; Node.js is needed only when you change classes or colours:
+
+```bash
+mkdir -p /tmp/tw && cd /tmp/tw && npm init -y && npm install tailwindcss@3.4.17   # once, outside the repository
+cd <repository>
+/tmp/tw/node_modules/.bin/tailwindcss -c tailwind.config.js -i tailwind-input.css -o static/css/app.css --minify
+```
+
+Classes that `static/js/app.js` assembles from parts (for example `toast-${type}`) must be listed in the `safelist`
+of `tailwind.config.js`. `tests/test_design_tokens.py` checks the WCAG contrast of the colour tokens in the result.
+
 ## Build options
 
 | Variable (at build time) | Effect |

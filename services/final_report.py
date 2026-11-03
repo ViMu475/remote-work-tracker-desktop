@@ -30,11 +30,31 @@ def is_over_quota(month):
 
 
 def _sort_key(month):
-    return (int(month.get('jahr') or 0), Config.MONATS_NUMMERN.get(month.get('monat'), 0))
+    try:
+        year = int(month.get('jahr') or 0)
+    except (TypeError, ValueError):
+        year = 0
+    monat = month.get('monat')
+    return (year, Config.MONATS_NUMMERN.get(monat, 0) if isinstance(monat, str) else 0)
 
 
 def sort_history(history, newest_first=False):
     return sorted(history or [], key=_sort_key, reverse=newest_first)
+
+
+def normalize_history(history):
+    """History without duplicates (the last entry of a month wins), always sorted by year and month."""
+    unique = {}
+    for m in history or []:
+        if not isinstance(m, dict):
+            continue
+        key = (m.get('jahr'), m.get('monat'))
+        try:
+            hash(key)
+        except TypeError:           # a list/dict as year or month name
+            key = (repr(key[0]), repr(key[1]))
+        unique[key] = m
+    return sort_history(list(unique.values()))
 
 
 def rate(remote, limit):

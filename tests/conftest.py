@@ -60,9 +60,9 @@ def empty_state_service(tmp_path):
 
 @pytest.fixture
 def sample_state():
-    with open(os.path.join(SAMPLE_DATA_DIR, 'test_state.json')) as f:
+    with open(os.path.join(SAMPLE_DATA_DIR, 'test_state.json'), encoding='utf-8') as f:
         return json.load(f)
 
 def load_test_state(path):
-    with open(path) as f:
+    with open(path, encoding='utf-8') as f:
         return json.load(f)

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Remote Work Tracker">
+  <rect width="512" height="512" rx="96" fill="#4F46E5"/>
+  <path d="M96 276 256 140l160 136v132a16 16 0 0 1-16 16H112a16 16 0 0 1-16-16z" fill="#FFFFFF"/>
+  <circle cx="256" cy="304" r="62" fill="none" stroke="#4F46E5" stroke-width="22"/>
+  <path d="M256 264v42l28 18" fill="none" stroke="#4F46E5" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

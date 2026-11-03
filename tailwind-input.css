@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- Design tokens (shared with the Android and iOS apps; all pairs checked for WCAG AA, see tests/test_design_tokens.py) ---- */
+:root {
+  color-scheme: light;
+  --page: #F3F4F6;  --surface: #FFFFFF;  --card: #F3F4F6;
+  --text: #111827;  --muted: #4B5563;  --border: #6B7280;
+  --primary: #4F46E5;  --on-primary: #FFFFFF;
+  --success: #047857;  --on-success: #FFFFFF;
+  --warning: #B45309;  --on-warning: #FFFFFF;
+  --error: #B91C1C;    --on-error: #FFFFFF;
+  --info: #1D4ED8;     --on-info: #FFFFFF;
+  --neutral: #374151;  --on-neutral: #FFFFFF;
+  --good-bg: #D1FAE5;  --good-fg: #064E3B;
+  --tight-bg: #FEF3C7; --tight-fg: #78350F;
+  --bad-bg: #FEE2E2;   --bad-fg: #7F1D1D;
+  --shadow: 0 10px 25px -12px rgba(17, 24, 39, .35);
+}
+.dark-mode {
+  color-scheme: dark;
+  --page: #111827;  --surface: #1F2937;  --card: #374151;
+  --text: #E6E9EF;  --muted: #D1D5DB;  --border: #9CA3AF;
+  --primary: #A5B4FC;  --on-primary: #1E1B4B;
+  --success: #34D399;  --on-success: #052E1C;
+  --warning: #FBBF24;  --on-warning: #1F1300;
+  --error: #FCA5A5;    --on-error: #450A0A;
+  --info: #93C5FD;     --on-info: #0B1E4A;
+  --neutral: #4B5563;  --on-neutral: #FFFFFF;
+  --good-bg: #0B3B2C;  --good-fg: #A7F3D0;
+  --tight-bg: #3B2A06; --tight-fg: #FDE68A;
+  --bad-bg: #4C1515;   --bad-fg: #FECACA;
+  --shadow: 0 10px 25px -12px rgba(0, 0, 0, .7);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light-mode) {
+    color-scheme: dark;
+    --page: #111827;  --surface: #1F2937;  --card: #374151;
+    --text: #E6E9EF;  --muted: #D1D5DB;  --border: #9CA3AF;
+    --primary: #A5B4FC;  --on-primary: #1E1B4B;
+    --success: #34D399;  --on-success: #052E1C;
+    --warning: #FBBF24;  --on-warning: #1F1300;
+    --error: #FCA5A5;    --on-error: #450A0A;
+    --info: #93C5FD;     --on-info: #0B1E4A;
+    --neutral: #4B5563;  --on-neutral: #FFFFFF;
+    --good-bg: #0B3B2C;  --good-fg: #A7F3D0;
+    --tight-bg: #3B2A06; --tight-fg: #FDE68A;
+    --bad-bg: #4C1515;   --bad-fg: #FECACA;
+    --shadow: 0 10px 25px -12px rgba(0, 0, 0, .7);
+  }
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--page); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-wrap: anywhere; }
+:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.dark-mode :focus-visible { outline-color: var(--primary); }
+
+@layer components {
+  .section { background: var(--surface); border-radius: 1rem; padding: 1.25rem; box-shadow: var(--shadow); margin-bottom: 1.5rem; }
+  .section-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 1rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
+  .tile { background: var(--card); border-radius: .75rem; padding: .75rem; }
+  .muted { color: var(--muted); }
+  .accent { color: var(--primary); }
+  .divider > * + * { border-top: 1px solid var(--border); }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 44px; min-width: 44px; padding: .5rem 1rem;
+         border-radius: .75rem; font-weight: 700; border: 2px solid transparent; cursor: pointer; text-decoration: none; transition: filter .15s; }
+  .btn:hover:not(:disabled) { filter: brightness(.92); }
+  .dark-mode .btn:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn:disabled, .btn[aria-busy="true"] { opacity: .6; cursor: progress; }
+  .btn-sm { padding: .25rem .75rem; font-size: .875rem; }
+  .btn-primary { background: var(--primary); color: var(--on-primary); }
+  .btn-success { background: var(--success); color: var(--on-success); }
+  .btn-warning { background: var(--warning); color: var(--on-warning); }
+  .btn-error { background: var(--error); color: var(--on-error); }
+  .btn-info { background: var(--info); color: var(--on-info); }
+  .btn-neutral { background: var(--neutral); color: var(--on-neutral); }
+  .btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
+  .btn-outline-danger { background: transparent; color: var(--error); border-color: var(--error); }
+  .btn-outline-danger:hover:not(:disabled) { background: var(--error); color: var(--on-error); filter: none; }
+  .spinner { width: 1rem; height: 1rem; border-radius: 9999px; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
+  .field { display: block; width: 100%; min-height: 44px; padding: .5rem .75rem; border-radius: .5rem; border: 1px solid var(--border);
+           background: var(--surface); color: var(--text); font: inherit; }
+  .field-label { display: block; font-size: .875rem; font-weight: 600; color: var(--muted); }
+
+  .version-badge { background: var(--card); color: var(--text); padding: 4px 10px; border-radius: 9999px; font-size: .875rem; font-weight: 700; }
+  .title-bar { border-bottom: 4px solid var(--primary); }
+
+  .kpi { border-radius: .75rem; padding: .75rem; font-weight: 800; font-size: 2.25rem; line-height: 1.2; }
+  .kpi-ok { background: var(--success); color: var(--on-success); }
+  .kpi-warn { background: var(--warning); color: var(--on-warning); }
+  .kpi-err { background: var(--error); color: var(--on-error); }
+
+  .bar-track { height: 1.25rem; border-radius: 9999px; background: var(--card); border: 1px solid var(--border); overflow: hidden; }
+  .bar-fill { height: 100%; transition: width .3s; }
+  .bar-ok { background: var(--success); } .bar-warn { background: var(--warning); } .bar-err { background: var(--error); }
+
+  .badge { display: inline-flex; align-items: center; gap: .25rem; padding: .125rem .5rem; border-radius: 9999px; font-size: .75rem; font-weight: 700; }
+  .badge-over { background: var(--bad-bg); color: var(--bad-fg); border: 1px solid var(--error); }
+  .badge-info { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  .badge-remote { background: var(--good-bg); color: var(--good-fg); }
+
+  .over-quota { border-left: 4px solid var(--error); }
+  .rating-good { background: var(--good-bg); color: var(--good-fg); }
+  .rating-tight { background: var(--tight-bg); color: var(--tight-fg); }
+  .rating-exceeded { background: var(--bad-bg); color: var(--bad-fg); }
+  .warn-text { color: var(--error); font-weight: 700; }
+  .edit-hint { color: var(--warning); font-weight: 700; }
+
+  .menu { position: relative; }
+  .menu > summary { list-style: none; cursor: pointer; }
+  .menu > summary::-webkit-details-marker { display: none; }
+  .menu-panel { position: absolute; z-index: 20; margin-top: .25rem; min-width: 14rem; display: flex; flex-direction: column; gap: .5rem; padding: .5rem;
+                background: var(--surface); border: 1px solid var(--border); border-radius: .75rem; box-shadow: var(--shadow); }
+  .menu-panel .btn { justify-content: flex-start; }
+
+  dialog.dlg { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 1rem; padding: 1.5rem;
+               width: min(92vw, 40rem); max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow); margin: auto; }
+  dialog.dlg::backdrop { background: rgba(0, 0, 0, .55); }
+  dialog.dlg-sm { width: min(92vw, 28rem); }
+
+  .toast-region { position: fixed; z-index: 2000; left: 1rem; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; align-items: center; pointer-events: none; }
+  dialog .toast-region { position: sticky; bottom: 0; left: auto; right: auto; margin-top: 1rem; }
+  .toast { pointer-events: auto; display: flex; align-items: center; gap: .75rem; max-width: 36rem; width: 100%; padding: .5rem .5rem .5rem 1rem;
+           border-radius: .75rem; font-weight: 700; box-shadow: var(--shadow); }
+  .toast-success { background: var(--success); color: var(--on-success); }
+  .toast-error { background: var(--error); color: var(--on-error); }
+  .toast-warning { background: var(--warning); color: var(--on-warning); }
+  .toast-info { background: var(--info); color: var(--on-info); }
+  .toast button { background: transparent; color: inherit; border: 0; min-width: 44px; min-height: 44px; font-size: 1.25rem; cursor: pointer; border-radius: .5rem; }
+  .toast button:focus-visible { outline-color: currentColor; }
+}
+
+@media print {
+  #app, .toast-region { display: none !important; }
+  dialog#final-report-modal { position: static; width: 100%; max-height: none; box-shadow: none; border: 0; }
+  dialog#final-report-modal .no-print { display: none !important; }
+}

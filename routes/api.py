@@ -1,8 +1,10 @@
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, g
 import io
 import csv
 import json
 import hmac
+import math
+import threading
 import os
 import secrets
 import shutil
@@ -11,6 +13,7 @@ from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
 from services.state_service import StateService
 from services.calculation import (
+    assign_statement_breaks,
     calculate_net_hours, 
     check_time_overlap, 
     is_working_day_valid,
@@ -18,13 +21,57 @@ from services.calculation import (
 )
 from services.pdf_service import PDFService
 from services.report_service import ReportService
-from services.final_report import build_final_report, sort_history
+from services.final_report import build_final_report, normalize_history, sort_history
 from config import Config
 
 api = Blueprint('api', __name__)
 state_service = StateService()
 pdf_service = PDFService()
 report_service = ReportService()
+
+# Every request reads the state file, changes it and writes it back. The development server is
+# threaded (double click, two tabs), so two such cycles must never interleave or one change is lost.
+_state_lock = threading.RLock()
+
+
+@api.before_request
+def _serialize_state_access():
+    if request.endpoint == 'api.analyze_pdf':   # does not touch the state; parsing may take a while
+        return
+    _state_lock.acquire()
+    g._state_lock_held = True
+
+
+@api.teardown_request
+def _release_state_lock(exc=None):
+    if g.pop('_state_lock_held', False):
+        _state_lock.release()
+
+
+def _json_body():
+    """The JSON body as a dict; anything else (null, list, number, broken JSON, wrong type) counts as empty."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _safe_number(value, default=0.0):
+    try:
+        return _finite_number(value)
+    except ValueError:
+        return default
+
+
+def _finite_number(value):
+    """float(value) for numbers and numeric strings; ValueError for NaN/Infinity, bool, None, lists, huge ints."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f'not a number: {value!r}')
+    try:
+        number = float(value)
+    except OverflowError:
+        raise ValueError('number too large')
+    if not math.isfinite(number):
+        raise ValueError('not finite')
+    return number
 
 @api.route('/state', methods=['GET'])
 def get_state():
@@ -35,7 +82,7 @@ def get_state():
 
 @api.route('/protokoll', methods=['POST'])
 def protokoll():
-    data = request.json
+    data = _json_body()
     state = state_service.load_state()
 
     datum = data.get('datum', '')
@@ -46,7 +93,9 @@ def protokoll():
         return jsonify({'success': False, 'message': 'Fehlende Pflichtfelder'}), 400
 
     try:
-        pause = float(data.get('pause', 0))
+        pause = _finite_number(data.get('pause') if data.get('pause') is not None else 0)
+        if pause < 0:
+            raise ValueError('negative break')
     except ValueError:
         return jsonify({'success': False, 'message': 'Ungültige Pausenangabe'}), 400
 
@@ -69,7 +118,9 @@ def protokoll():
 
     try:
         remote_raw = data.get('remote', '')
-        remote_stunden = float(remote_raw) if remote_raw != '' else total_stunden
+        remote_stunden = _finite_number(remote_raw) if remote_raw not in ('', None) else total_stunden
+        if remote_stunden < 0:
+            raise ValueError('negative remote hours')
     except ValueError:
         return jsonify({'success': False, 'message': 'Ungültige Remote-Stundenangabe'}), 400
 
@@ -153,16 +204,52 @@ def analyze_pdf():
         if scratch_dir:
             shutil.rmtree(scratch_dir, ignore_errors=True)
 
+def _clean_flex_balance(raw):
+    """Flextime balance from a statement, validated: only known numeric fields are kept."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for key in ('previous', 'current', 'total'):
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) < 10000:
+            out[key] = round(float(value), 2)
+    if not out:
+        return None
+    for key in ('year', 'month'):
+        value = raw.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            out[key] = value
+    return out
+
+
 @api.route('/pdf/import', methods=['POST'])
 def import_pdf_sessions():
-    data = request.json
+    data = _json_body()
     state = state_service.load_state()
 
     sessions = data.get('sessions', [])
+    if not isinstance(sessions, list):
+        return jsonify({'success': False, 'message': 'Ungültige Sessions'}), 400
     imported_count = 0
+    updated_count = 0
     errors = []
 
-    for session in sessions:
+    # The statement lists the booked time (from-to); its "Istz" column is that time minus the legal
+    # break. The break of a day is derived from all of its sessions, then stored as the pause.
+    pauses = [0.0] * len(sessions)
+    by_day = {}
+    for idx, item in enumerate(sessions):
+        if isinstance(item, dict) and item.get('date') and item.get('start_time') and item.get('end_time'):
+            by_day.setdefault(item.get('date'), []).append(idx)
+    for idxs in by_day.values():
+        try:
+            for idx, pause in zip(idxs, assign_statement_breaks(
+                    [(sessions[i].get('start_time'), sessions[i].get('end_time')) for i in idxs])):
+                pauses[idx] = pause
+        except (ValueError, AttributeError):
+            pass   # an invalid time is reported below for that session
+
+    for session_index, session in enumerate(sessions):
         try:
             datum = session.get('date')
             start = session.get('start_time')
@@ -179,18 +266,29 @@ def import_pdf_sessions():
                 errors.append(f"{datum}: {validation_error}")
                 continue
 
-            overlap_error = check_time_overlap(datum, start, end, state)
-            if overlap_error:
-                errors.append(f"{datum}: {overlap_error}")
-                continue
-
-            time_result = calculate_net_hours(start, end, 0)
-            total_stunden = time_result['net']
-            remote_stunden = total_stunden if is_remote else 0
-
             day_list = state['daily_records'].get(datum, [])
             if not isinstance(day_list, list):
                 day_list = [] if day_list is None else ([day_list] if isinstance(day_list, dict) else [])
+
+            # Loading the same statement again corrects the earlier import in place (same day, start, end)
+            same = next((e for e in day_list if isinstance(e, dict) and e.get('source') == 'pdf_import'
+                         and e.get('startTime') == start and e.get('endTime') == end), None)
+            if same is not None:
+                day_list.remove(same)
+                state['daily_records'][datum] = day_list
+
+            overlap_error = check_time_overlap(datum, start, end, state)
+            if overlap_error:
+                if same is not None:
+                    day_list.append(same)
+                    state['daily_records'][datum] = day_list
+                errors.append(f"{datum}: {overlap_error}")
+                continue
+
+            pause = pauses[session_index]
+            time_result = calculate_net_hours(start, end, pause)
+            total_stunden = time_result['net']
+            remote_stunden = total_stunden if is_remote else 0
 
             entry_id = f"{datum}|{start}|{end}|{int(datetime.now(timezone.utc).timestamp() * 1000)}"
             new_entry = {
@@ -198,12 +296,12 @@ def import_pdf_sessions():
                 'datum': datum,
                 'startTime': start,
                 'endTime': end,
-                'pauseMinutes': 0,
+                'pauseMinutes': pause,
                 'remoteStundenHeute': remote_stunden,
                 'totalStundenHeute': total_stunden,
                 'source': 'pdf_import',
-                # A statement lists sessions without breaks (pause is stored as 0), so a break
-                # warning would be wrong for every long session: no warning for imported entries.
+                # The pause is the break the time system deducted; a break warning would be wrong
+                # for imported entries (the statement is the authority): none.
                 'pauseWarning': None,
                 'pauseWarningDe': None,
                 'pauseWarningEn': None
@@ -211,7 +309,10 @@ def import_pdf_sessions():
 
             day_list.append(new_entry)
             state['daily_records'][datum] = day_list
-            imported_count += 1
+            if same is not None:
+                updated_count += 1
+            else:
+                imported_count += 1
 
         except Exception as e:
             errors.append(f"Fehler bei Session {session}: {str(e)}")
@@ -228,10 +329,16 @@ def import_pdf_sessions():
         state['view_year'] = date_obj.year
         break
 
+    flex = _clean_flex_balance(data.get('flex_balance'))
+    if flex:
+        state['gleitzeit_saldo'] = flex
+
     state_service.recalc_monthly_totals(state)
     state_service.save_state(state)
 
     msg = f"{imported_count} Sessions importiert"
+    if updated_count:
+        msg += f", {updated_count} bestehende korrigiert"
     if errors:
         msg += f" ({len(errors)} Fehler)"
 
@@ -239,6 +346,7 @@ def import_pdf_sessions():
         'success': True,
         'message': msg,
         'imported_count': imported_count,
+        'updated_count': updated_count,
         'errors': errors,
         'state': state
     })
@@ -270,7 +378,7 @@ def delete_record(entry_id):
 
 @api.route('/update/<entry_id>', methods=['PUT'])
 def update_record(entry_id):
-    data = request.json or {}
+    data = _json_body()
     state = state_service.load_state()
 
     datum = data.get('datum', '')
@@ -281,7 +389,9 @@ def update_record(entry_id):
         return jsonify({'success': False, 'message': 'Fehlende Pflichtfelder'}), 400
 
     try:
-        pause = float(data.get('pause', 0))
+        pause = _finite_number(data.get('pause') if data.get('pause') is not None else 0)
+        if pause < 0:
+            raise ValueError('negative break')
     except ValueError:
         return jsonify({'success': False, 'message': 'Ungültige Pausenangabe'}), 400
 
@@ -303,7 +413,9 @@ def update_record(entry_id):
 
     try:
         remote_raw = data.get('remote', '')
-        remote_stunden = float(remote_raw) if remote_raw != '' else total_stunden
+        remote_stunden = _finite_number(remote_raw) if remote_raw not in ('', None) else total_stunden
+        if remote_stunden < 0:
+            raise ValueError('negative remote hours')
     except ValueError:
         return jsonify({'success': False, 'message': 'Ungültige Remote-Stundenangabe'}), 400
 
@@ -362,9 +474,9 @@ def update_record(entry_id):
 
 @api.route('/quote', methods=['POST'])
 def update_quote():
-    data = request.json
+    data = _json_body()
     try:
-        new_quote = float(data['quote'])
+        new_quote = _finite_number(data['quote'])
     except (KeyError, ValueError):
         return jsonify({'success': False, 'message': 'Ungültige Quote'}), 400
 
@@ -382,9 +494,9 @@ def update_quote():
 
 @api.route('/sollstunden', methods=['POST'])
 def update_sollstunden():
-    data = request.json
+    data = _json_body()
     try:
-        new_stunden = float(data['sollStunden'])
+        new_stunden = _finite_number(data['sollStunden'])
     except (KeyError, ValueError):
         return jsonify({'success': False, 'message': 'Ungültige Stunden'}), 400
 
@@ -402,7 +514,7 @@ def update_sollstunden():
 
 @api.route('/darkmode', methods=['POST'])
 def toggle_darkmode():
-    data = request.json
+    data = _json_body()
     dark_mode = bool(data.get('darkMode', False))
 
     state = state_service.load_state()
@@ -414,9 +526,9 @@ def toggle_darkmode():
 
 @api.route('/language', methods=['POST'])
 def set_language():
-    data = request.json
+    data = _json_body()
     lang = data.get('language', 'de')
-    if lang not in ('de', 'en'):
+    if not isinstance(lang, str) or lang not in ('de', 'en'):
         return jsonify({'success': False, 'message': 'Unsupported language'}), 400
     state = state_service.load_state()
     state['language'] = lang
@@ -460,13 +572,13 @@ def switch_month():
     existing = next((i for i, m in enumerate(history)
                      if m.get('monat') == closing_month and m.get('jahr') == closing_year), None)
     history_changed = True
-    if existing is None:
+    if existing is None and has_entries:
         history.append(completed_month)
-    elif has_entries:
+    elif existing is not None and has_entries:
         history[existing] = completed_month
     else:
-        history_changed = False
-    state['monatliche_historie'] = sort_history(history)
+        history_changed = False   # empty month or already closed without new entries: nothing is added
+    state['monatliche_historie'] = normalize_history(history)
     state['daily_records'] = {k: v for k, v in state.get('daily_records', {}).items() if not k.startswith(prefix)}
 
     state['aktuelles_jahr'] = next_year
@@ -481,11 +593,14 @@ def switch_month():
                            if m.get('quartal') == abgeschlossenes_quartal]
 
         if len(quartal_historie) >= 3:
-            gesamt_soll = sum(m['soll_stunden_gesamt'] for m in quartal_historie)
-            gesamt_ist_remote = sum(m['ist_remote_stunden_laufend'] for m in quartal_historie)
-            gesamt_ist_arbeitszeit = sum(m['ist_arbeitszeit_laufend'] for m in quartal_historie)
+            def total(key):      # a damaged history entry counts as 0 instead of breaking the month close
+                return sum(_safe_number(m.get(key)) for m in quartal_historie)
 
-            monthly_quotes = [m.get('tatsaechliche_remote_quote', 0) for m in quartal_historie]
+            gesamt_soll = total('soll_stunden_gesamt')
+            gesamt_ist_remote = total('ist_remote_stunden_laufend')
+            gesamt_ist_arbeitszeit = total('ist_arbeitszeit_laufend')
+
+            monthly_quotes = [_safe_number(m.get('tatsaechliche_remote_quote')) for m in quartal_historie]
             quartal_quote = sum(monthly_quotes) / len(monthly_quotes) if monthly_quotes else 0
 
             for m in quartal_historie:
@@ -494,7 +609,7 @@ def switch_month():
                 m['quartal_gesamt'] = gesamt_ist_arbeitszeit
                 m['quartal_soll'] = gesamt_soll
 
-            aktuelle_quote = quartal_historie[0]['individuelle_quote']
+            aktuelle_quote = _safe_number(quartal_historie[0].get('individuelle_quote'), state['individuelle_quote_prozent'])
             gesamt_max_remote = gesamt_soll * (aktuelle_quote / 100.0)
 
             if gesamt_ist_remote > gesamt_max_remote:
@@ -515,6 +630,10 @@ def switch_month():
     state_service.save_state(state)
 
     msg = f"Monatswechsel zu {next_month} abgeschlossen."
+    if not has_entries:
+        msg += (f" {closing_month} {closing_year} hat keine Einträge und wurde nicht in die Historie aufgenommen."
+                if state.get('language', 'de') == 'de' else
+                f" {closing_month} {closing_year} has no entries and was not added to the history.")
     if quartal_msg:
         msg += f" | {quartal_msg}"
 
@@ -536,9 +655,9 @@ def set_view_to_current_month():
 @api.route('/view/month', methods=['POST'])
 def set_view_month():
     """Show any month (entries and totals of that month); the system month stays untouched."""
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     month, year = data.get('month'), data.get('year')
-    if month not in Config.MONATS_NUMMERN or isinstance(year, bool) or not isinstance(year, int) or not 1990 <= year <= 2100:
+    if not isinstance(month, str) or month not in Config.MONATS_NUMMERN or isinstance(year, bool) or not isinstance(year, int) or not 1990 <= year <= 2100:
         return jsonify({'success': False, 'message': 'Ungültiger Monat oder ungültiges Jahr'}), 400
     state = state_service.load_state()
     state['view_month'] = month
@@ -563,10 +682,10 @@ def export_daily_csv():
     if isinstance(dr, dict):
         for date_key, val in dr.items():
             if isinstance(val, list):
-                flat.extend(val)
+                flat.extend(r for r in val if isinstance(r, dict))
             elif isinstance(val, dict):
                 flat.append(val)
-    flat.sort(key=lambda r: (r.get('datum', ''), r.get('startTime', '')))
+    flat.sort(key=lambda r: (str(r.get('datum', '')), str(r.get('startTime', ''))))
     
     # Filter for current view month
     view_month = state.get('view_month', state.get('aktueller_monat'))
@@ -619,23 +738,25 @@ def monthly_pdf():
         if isinstance(dr, dict):
             for date_key, val in dr.items():
                 if isinstance(val, list):
-                    flat.extend(val)
+                    flat.extend(r for r in val if isinstance(r, dict))
                 elif isinstance(val, dict):
                     flat.append(val)
-        flat.sort(key=lambda r: (r.get('datum', ''), r.get('startTime', '')))
+        flat.sort(key=lambda r: (str(r.get('datum', '')), str(r.get('startTime', ''))))
         
         # Filter
         view_month_num = Config.MONATS_NUMMERN.get(target_month, 1)
         for r in flat:
             try:
                 d = datetime.strptime(r.get('datum'), '%Y-%m-%d')
-                if d.year == target_year and d.month == view_month_num:
+                complete = all(k in r for k in ('startTime', 'endTime', 'pauseMinutes')) and all(
+                    isinstance(r.get(k), (int, float)) for k in ('remoteStundenHeute', 'totalStundenHeute'))
+                if complete and d.year == target_year and d.month == view_month_num:
                     day_records.append(r)
             except:
                 pass
     else:
         for m in state.get('monatliche_historie', []):
-            if m.get('monat') == target_month and m.get('jahr') == target_year:
+            if isinstance(m, dict) and m.get('monat') == target_month and m.get('jahr') == target_year:
                 month_data = m
                 break
 
@@ -656,6 +777,38 @@ def backup_state():
     return Response(data, mimetype='application/json',
                     headers={'Content-Disposition': 'attachment; filename=tracker_state_backup.json'})
 
+def _restore_problem(st):
+    """Why this backup cannot be used (the fields the rest of the app relies on), or None."""
+    def is_int(v):
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    def is_num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+    if not isinstance(st['daily_records'], dict):
+        return 'daily_records'
+    if not isinstance(st['current_month_data'], dict):
+        return 'current_month_data'
+    if not is_num(st['individuelle_quote_prozent']) or not (
+            Config.MIN_INDIVIDUELLE_QUOTE_PROZENT <= st['individuelle_quote_prozent']
+            <= Config.MAX_INDIVIDUELLE_QUOTE_PROZENT):
+        return 'individuelle_quote_prozent'
+    if not is_num(st['soll_stunden_pro_tag']) or not 1.0 <= st['soll_stunden_pro_tag'] <= 10.0:
+        return 'soll_stunden_pro_tag'
+    if not is_int(st['aktuelles_jahr']) or not 1990 <= st['aktuelles_jahr'] <= 2100:
+        return 'aktuelles_jahr'
+    if not isinstance(st['aktueller_monat'], str) or st['aktueller_monat'] not in Config.MONATS_NUMMERN:
+        return 'aktueller_monat'
+    if 'view_month' in st and (not isinstance(st['view_month'], str) or st['view_month'] not in Config.MONATS_NUMMERN):
+        return 'view_month'
+    if 'view_year' in st and (not is_int(st['view_year']) or not 1990 <= st['view_year'] <= 2100):
+        return 'view_year'
+    hist = st.get('monatliche_historie')
+    if hist is not None and (not isinstance(hist, list) or not all(isinstance(m, dict) for m in hist)):
+        return 'monatliche_historie'
+    return None
+
+
 @api.route('/restore', methods=['POST'])
 def restore_state():
     if 'file' in request.files:
@@ -665,14 +818,28 @@ def restore_state():
         content = request.get_data()
     try:
         new_state = json.loads(content)
-    except Exception:
+    except Exception:       # broken JSON, invalid UTF-8, nesting too deep, ...
         return jsonify({'success': False, 'message': 'Ungültige JSON-Datei'}), 400
 
     required_keys = {'individuelle_quote_prozent', 'soll_stunden_pro_tag', 'aktuelles_jahr', 'aktueller_monat',
                      'daily_records', 'current_month_data'}
-    if not required_keys.issubset(new_state.keys()):
+    if not isinstance(new_state, dict) or not required_keys.issubset(new_state.keys()):
         return jsonify({'success': False, 'message': 'JSON enthält nicht alle erforderlichen Felder'}), 400
 
+    problem = _restore_problem(new_state)
+    if problem:
+        return jsonify({'success': False, 'message': f'Ungültige Sicherung: {problem}'}), 400
+
+    # an older backup may predate these fields
+    if not isinstance(new_state.get('monatliche_historie'), list):
+        new_state['monatliche_historie'] = []
+    new_state['monatliche_historie'] = normalize_history(new_state['monatliche_historie'])  # sorted, no duplicates
+    if 'gleitzeit_saldo' in new_state:
+        flex = _clean_flex_balance(new_state['gleitzeit_saldo'])
+        if flex:
+            new_state['gleitzeit_saldo'] = flex
+        else:
+            del new_state['gleitzeit_saldo']
     try:
         state_service.recalc_monthly_totals(new_state)  # a backup may carry stale totals
     except Exception:

@@ -168,3 +168,25 @@ class TestGeminiMarkdownCleanup:
         assert len(result['sessions']) == 1
         assert result['sessions'][0]['date'] == '2025-12-01'
         assert result['structure']['method'] == 'gemini'
+
+
+# ── 5. Day lines without a booking must not swallow the next day's continuation line ──
+
+class TestDayWithoutOwnBooking:
+    def test_continuation_after_flextime_compensation_belongs_to_that_day(self, tmp_path):
+        lines = ["Zeitnachweis", "vom 01.10.2031 bis 31.10.2031",
+                 "14 DI  Zeitbuchungen : Remote Work  08:00  17:00  9,00",
+                 "15 MI  Gleitzeitausgleich  08:00  12:00  4,00",
+                 "Zeitbuchungen : Remote Work  12:00  17:00  5,00"]
+        pdf_path = _make_statement_pdf(tmp_path, 'Zeitnachweis_20311001_20311031.pdf', lines)
+        got = [(s['date'], s['start_time'], s['end_time']) for s in _get_pdf_service()._parse_sap_timestatement(pdf_path)['sessions']]
+        assert got == [('2031-10-14', '08:00', '17:00'), ('2031-10-15', '12:00', '17:00')]
+
+    def test_continuation_after_a_holiday_line_is_not_attached_to_the_day_before(self, tmp_path):
+        lines = ["Zeitnachweis", "vom 01.10.2031 bis 31.10.2031",
+                 "02 MI  Zeitbuchungen : Remote Work  08:00  16:00  8,00",
+                 "03 DO  Tag der Deutschen Einheit",
+                 "Zeitbuchungen : Remote Work  09:00  10:00  1,00"]
+        pdf_path = _make_statement_pdf(tmp_path, 'Zeitnachweis_20311001_20311031.pdf', lines)
+        got = [(s['date'], s['start_time']) for s in _get_pdf_service()._parse_sap_timestatement(pdf_path)['sessions']]
+        assert ('2031-10-02', '09:00') not in got

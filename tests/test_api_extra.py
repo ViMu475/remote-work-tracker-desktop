@@ -51,7 +51,12 @@ def _december_state(sample_state, ist_remote_history):
     state.update({
         "aktueller_monat": "Dezember", "aktuelles_jahr": 2026,
         "view_month": "Dezember", "view_year": 2026,
-        "current_quartal": "Q4/2026", "daily_records": {},
+        "current_quartal": "Q4/2026",
+        # an open month that is closed normally has entries (an empty month is never put into the history)
+        "daily_records": {"2026-12-01": [{
+            "id": "1790000000000", "datum": "2026-12-01", "startTime": "08:00", "endTime": "16:30",
+            "pauseMinutes": 30, "remoteStundenHeute": 4.0, "totalStundenHeute": 8.0,
+            "pauseWarning": None, "source": None}]},
         "current_month_data": {
             "monat": "Dezember", "jahr": 2026, "soll_stunden_gesamt": 160.0,
             "ist_remote_stunden_laufend": 0.0, "ist_arbeitszeit_laufend": 0.0,

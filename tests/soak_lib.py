@@ -55,8 +55,17 @@ def is_workday(d):
     return d.weekday() < 5 and d not in holidays_of(d.year)
 
 
+def day_share(d):
+    """Share of a working day that is due: 24 Dec is off, 31 Dec is a half day (company rule)."""
+    if (d.month, d.day) == (12, 24):
+        return 0.0
+    if (d.month, d.day) == (12, 31):
+        return 0.5
+    return 1.0
+
+
 def soll(year, month, per_day):
-    n = sum(1 for day in range(1, calendar.monthrange(year, month)[1] + 1)
+    n = sum(day_share(datetime.date(year, month, day)) for day in range(1, calendar.monthrange(year, month)[1] + 1)
             if is_workday(datetime.date(year, month, day)))
     return n * per_day
 
@@ -83,6 +92,7 @@ class Model:
         self.now = now
         self.quarter_years = set(quarter_years)
         self.entries = {}                  # (datum, start, end) -> (pause, remote, total)
+        self.imported = set()              # keys of entries that came from a statement
         self.history = []                  # dicts
         self.quote = 40.0
         self.soll_day = 8.0
@@ -91,10 +101,10 @@ class Model:
 
     # -- helpers ----------------------------------------------------
     def snapshot(self):
-        return copy.deepcopy((self.entries, self.history, self.quote, self.soll_day, self.view))
+        return copy.deepcopy((self.entries, self.history, self.quote, self.soll_day, self.view, self.imported))
 
     def restore(self, snap):
-        self.entries, self.history, self.quote, self.soll_day, self.view = copy.deepcopy(snap)
+        self.entries, self.history, self.quote, self.soll_day, self.view, self.imported = copy.deepcopy(snap)
 
     def overlaps(self, datum, start, end, ignore=None):
         a, b = mins(start), mins(end)
@@ -234,14 +244,29 @@ class Driver:
         m = self.model
         sessions = sessions if sessions is not None else make_statement(year, month, self.rng)
         self.note(f'Import {label}{year}-{month:02d} ({len(sessions)} Sessions)')
-        accepted = rejected = 0
-        for s in sessions:
+        accepted = rejected = updated = 0
+        # the break of a day comes from all of its sessions (the statement's own rule, see services/calculation.py)
+        from services.calculation import assign_statement_breaks
+        by_day = collections.defaultdict(list)
+        for i, s in enumerate(sessions):
+            by_day[s['date']].append(i)
+        pauses = {}
+        for idxs in by_day.values():
+            for i, p in zip(idxs, assign_statement_breaks([(sessions[i]['start_time'], sessions[i]['end_time']) for i in idxs])):
+                pauses[i] = p
+        for i, s in enumerate(sessions):
             d = datetime.date.fromisoformat(s['date'])
-            ok = (datetime.datetime(d.year, d.month, d.day) <= m.now and is_workday(d)
-                  and not m.overlaps(s['date'], s['start_time'], s['end_time']))
-            if ok:
-                total = net_hours(s['start_time'], s['end_time'], 0)
-                m.entries[(s['date'], s['start_time'], s['end_time'])] = (0, total if s['is_remote'] else 0.0, total)
+            key = (s['date'], s['start_time'], s['end_time'])
+            valid_day = datetime.datetime(d.year, d.month, d.day) <= m.now and is_workday(d)
+            again = key in m.entries and key in m.imported      # same statement loaded again: corrected in place
+            if valid_day and again and not m.overlaps(s['date'], s['start_time'], s['end_time'], ignore=(s['start_time'], s['end_time'])):
+                total = net_hours(s['start_time'], s['end_time'], pauses[i])
+                m.entries[key] = (pauses[i], total if s['is_remote'] else 0.0, total)
+                updated += 1
+            elif valid_day and not m.overlaps(s['date'], s['start_time'], s['end_time']):
+                total = net_hours(s['start_time'], s['end_time'], pauses[i])
+                m.entries[key] = (pauses[i], total if s['is_remote'] else 0.0, total)
+                m.imported.add(key)
                 accepted += 1
             else:
                 rejected += 1
@@ -273,6 +298,7 @@ class Driver:
                     f'Eintrag {datum}: App antwortet {resp.status_code}, Modell erwartet {"200" if ok else "400"} ({resp.get_json().get("message")})')
         if ok:
             m.entries[(datum, start, end)] = (pause, total if remote is None else remote, total)
+            m.imported.discard((datum, start, end))
         self.check(resp.get_json().get('state') if ok else self.get_state())
         return ok
 
@@ -342,8 +368,11 @@ class Driver:
         has_entries = any(d.startswith(prefix) for (d, _s, _e) in m.entries)
         existing = next((i for i, h in enumerate(m.history) if h['monat'] == snap['monat'] and h['jahr'] == y), None)
         changed = True
-        if existing is None:
+        if existing is None and has_entries:
             m.history.append(snap)
+        elif existing is None:
+            changed = False
+            m.obs['Abschluss eines leeren Monats: nicht in die Historie aufgenommen'] += 1
         elif has_entries:
             m.history[existing] = snap
             m.obs['Monat in der Historie aktualisiert'] += 1

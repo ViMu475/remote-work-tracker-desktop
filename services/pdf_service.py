@@ -21,6 +21,29 @@ except ImportError:
     genai = None
 
 
+_NUM = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(-)?'
+_FLEX_PATTERNS = {
+    'previous': r'(?:GLZ-Saldo\s+Vorperiode|Flex\.?\s*Bal\.?\s*Prev\.?\s*Period)\s+' + _NUM,
+    'current': r'(?:GLZ-Saldo\s+akt\.?\s*Periode|Flextime\s+Bal\.?\s*Curr\.?\s*Period)\s*' + _NUM,
+    'total': r'(?:GLZ-Saldo\s+Gesamt|Flextime\s+Balance\s+Total)\s+' + _NUM,
+}
+
+
+def parse_flex_balance(text):
+    """Flextime balance (hours) from the summary of a statement, or None when it has none.
+
+    Keys: previous period, current period, total. A trailing minus sign ("12,50-") means negative.
+    Only the first match counts: the same labels appear again in the overtime table on the right.
+    """
+    result = {}
+    for key, pattern in _FLEX_PATTERNS.items():
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            value = float(m.group(1).replace('.', '').replace(',', '.'))
+            result[key] = -value if m.group(2) else value
+    return result or None
+
+
 class PDFService:
     def __init__(self):
         self.model = None
@@ -179,7 +202,15 @@ class PDFService:
             lines = full_text.split('\n')
             current_day = None
 
+            day_start = re.compile(r'^\s*(\d{2})\s+' + weekdays + r'\b', re.IGNORECASE)
+
             for line in lines:
+                # Every day line starts a new day, also lines without a booking of their own
+                # (flextime compensation, holiday): a following continuation line belongs to THAT day.
+                day_line = day_start.match(line)
+                if day_line:
+                    current_day = int(day_line.group(1))
+
                 # Try first pattern (with day number)
                 match1 = pattern1.search(line)
                 if match1:
@@ -240,10 +271,15 @@ class PDFService:
             remote_count = sum(1 for s in sessions if s['is_remote'])
             office_count = len(sessions) - remote_count
 
+            flex_balance = parse_flex_balance(full_text)
+            if flex_balance:
+                flex_balance.update({'year': year, 'month': month})
+
             return {
                 "success": True,
                 "message": f"Parsed SAP TimeStatement. Found {len(sessions)} sessions ({remote_count} remote, {office_count} office).",
                 "sessions": sessions,
+                "flex_balance": flex_balance,
                 "structure": {
                     "format": "SAP TimeStatement",
                     "year": year,

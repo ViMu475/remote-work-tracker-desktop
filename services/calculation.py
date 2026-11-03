@@ -1,6 +1,16 @@
 from datetime import datetime
 import calendar
+import re
 from config import Config
+
+_HHMM = re.compile(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]')
+
+
+def parse_hhmm(value) -> int:
+    """Minutes since midnight of a strict 'HH:MM' (ASCII digits, 00:00-23:59); ValueError otherwise."""
+    if not isinstance(value, str) or not _HHMM.fullmatch(value):
+        raise ValueError(f'invalid time: {value!r}')
+    return int(value[:2]) * 60 + int(value[3:])
 
 def get_quartal_for_month(monat_name: str, jahr: int) -> str:
     """Bestimmt das Quartal für einen gegebenen Monat und Jahr"""
@@ -24,9 +34,7 @@ def get_current_month_from_system():
 def check_time_overlap(datum: str, start_time: str, end_time: str, state: dict, exclude_id: str = None):
     """Prüft ob es Zeitüberlappungen am selben Tag gibt"""
 
-    def time_to_minutes(time_str):
-        h, m = map(int, time_str.split(':'))
-        return h * 60 + m
+    time_to_minutes = parse_hhmm
 
     try:
         new_start = time_to_minutes(start_time)
@@ -74,7 +82,9 @@ def is_working_day_valid(datum_string: str, state: dict, allow_historical: bool 
     """
     try:
         date = datetime.strptime(datum_string, '%Y-%m-%d')
-    except ValueError:
+        if date.strftime('%Y-%m-%d') != datum_string:   # '2026-3-5', ' 2026-03-05', non-ASCII digits ...
+            raise ValueError(datum_string)
+    except (ValueError, TypeError):
         return "Ungültiges Datumsformat."
 
     tag = date.weekday()
@@ -114,9 +124,7 @@ def is_working_day_valid(datum_string: str, state: dict, allow_historical: bool 
 def calculate_net_hours(start_time: str, end_time: str, pause_minutes: float):
     """Berechnet Netto-Arbeitszeit"""
 
-    def time_to_minutes(time_str):
-        h, m = map(int, time_str.split(':'))
-        return h * 60 + m
+    time_to_minutes = parse_hhmm
 
     start_min = time_to_minutes(start_time)
     end_min = time_to_minutes(end_time)
@@ -149,8 +157,51 @@ def calculate_net_hours(start_time: str, end_time: str, pause_minutes: float):
         'pause_warning': pause_warning_de
     }
 
+def statement_break_minutes(work_minutes: int, gap_minutes: int = 0) -> int:
+    """Minutes the time system deducts from the booked time of ONE day (derived from real statements).
+
+    Required break: none up to 6 h; above 6 h 30 min, but never below 6 h net; above 9 h 45 min, but
+    never below 9 h net. Gaps between the day's bookings already count as break.
+    """
+    if work_minutes <= 360:
+        required = 0
+    elif work_minutes <= 390:
+        required = work_minutes - 360
+    elif work_minutes <= 570:
+        required = 30
+    else:
+        required = min(45, work_minutes - 540)
+    return max(0, required - max(0, gap_minutes))
+
+
+def assign_statement_breaks(sessions):
+    """Break minutes per session for the sessions of one day, in the order given.
+
+    `sessions` is a list of (start 'HH:MM', end 'HH:MM'). The deduction of the day goes to the longest session.
+    """
+    to_min = parse_hhmm
+
+    spans = []
+    for start, end in sessions:
+        s, e = to_min(start), to_min(end)
+        spans.append((s, e + 1440 if e < s else e))
+    if not spans:
+        return []
+    ordered = sorted(spans)
+    work = sum(e - s for s, e in ordered)
+    gaps = sum(max(0, ordered[i + 1][0] - ordered[i][1]) for i in range(len(ordered) - 1))
+    deduction = statement_break_minutes(work, gaps)
+    longest = max(range(len(spans)), key=lambda i: (spans[i][1] - spans[i][0], -i))
+    return [float(deduction) if i == longest else 0.0 for i in range(len(spans))]
+
+
+# Company-specific special days (no public holidays, but the time statement credits them):
+# (month, day) -> share of the daily target hours that is still due. 24 Dec is off, 31 Dec is a half day.
+SPECIAL_DAY_FACTOR = {(12, 24): 0.0, (12, 31): 0.5}
+
+
 def berechne_soll_stunden_monat(jahr: int, monat: int, soll_stunden_pro_tag: float) -> float:
-    """Berechnet Soll-Arbeitsstunden für einen Monat"""
+    """Berechnet Soll-Arbeitsstunden für einen Monat (Wochenenden, Feiertage und Sondertage berücksichtigt)"""
     arbeitsstunden = 0.0
     letzter_tag = calendar.monthrange(jahr, monat)[1]
 
@@ -160,6 +211,6 @@ def berechne_soll_stunden_monat(jahr: int, monat: int, soll_stunden_pro_tag: flo
         wochentag = date.weekday()
 
         if 0 <= wochentag <= 4 and datum_string not in Config.BAYERN_FEIERTAGE:
-            arbeitsstunden += soll_stunden_pro_tag
+            arbeitsstunden += soll_stunden_pro_tag * SPECIAL_DAY_FACTOR.get((monat, tag), 1.0)
 
     return arbeitsstunden

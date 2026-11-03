@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import threading
 from datetime import datetime, timezone
 from config import Config
 from services.calculation import (
@@ -55,6 +57,17 @@ class StateService:
                         state['language'] = 'de'
                     if 'daily_records' not in state:
                         state['daily_records'] = {}
+                    if not isinstance(state.get('monatliche_historie'), list):
+                        state['monatliche_historie'] = []
+                    if not isinstance(state['daily_records'], dict):
+                        state['daily_records'] = {}
+                    # numbers the calculations rely on: fall back to the defaults when damaged
+                    for key, default in (('soll_stunden_pro_tag', Config.SOLL_STUNDEN_PRO_TAG),
+                                         ('individuelle_quote_prozent', Config.BASIS_QUOTE_PROZENT)):
+                        value = state.get(key, default)
+                        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value \
+                                or value in (float('inf'), float('-inf')):
+                            state[key] = default
 
                     # Update current date info
                     system_month, system_year = get_current_month_from_system()
@@ -65,12 +78,12 @@ class StateService:
                     state['aktuelles_jahr'] = system_year
                     state['current_quartal'] = get_quartal_for_month(system_month, system_year)
 
-                    if 'current_month_data' not in state:
+                    if not isinstance(state.get('current_month_data'), dict):
                         state['current_month_data'] = {}
 
-                    if 'view_month' not in state:
+                    if state.get('view_month') not in Config.MONATS_NUMMERN:
                         state['view_month'] = system_month
-                    if 'view_year' not in state:
+                    if isinstance(state.get('view_year'), bool) or not isinstance(state.get('view_year'), int):
                         state['view_year'] = system_year
 
                     # Migration logic for IDs (simplified from original)
@@ -108,15 +121,35 @@ class StateService:
                     return state
             except Exception as e:
                 print(f"Fehler beim Laden: {e}")
+                self._keep_unreadable_file()
         return self.get_initial_state()
 
-    def save_state(self, state):
+    def _keep_unreadable_file(self):
+        """A state file that cannot be read is replaced by a fresh state on the next save: keep a copy first."""
         try:
-            with open(self.data_file, 'w', encoding='utf-8') as f:
+            if os.path.getsize(self.data_file) > 0:
+                stamp = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+                shutil.copyfile(self.data_file, f"{self.data_file}.unreadable-{stamp}")
+        except Exception as e:
+            print(f"Fehler beim Sichern der unlesbaren Datei: {e}")
+
+    def save_state(self, state):
+        # Write to a temporary file next to the target and swap it in: a crash or a parallel reader
+        # never sees a half-written state file.
+        tmp_path = f"{self.data_file}.tmp-{os.getpid()}-{threading.get_ident()}"
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.data_file)
             return True
         except Exception as e:
             print(f"Fehler beim Speichern: {e}")
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
             return False
 
     def calculate_quartal_totals(self, state):

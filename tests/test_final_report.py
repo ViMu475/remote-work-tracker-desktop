@@ -125,7 +125,11 @@ class TestIndexPage:
     def test_final_report_button_modal_and_red_style_are_in_the_page(self, client):
         html = client.get('/').get_data(as_text=True)
         assert 'handleFinalReport()' in html and 'id="final-report-modal"' in html
-        assert '.over-quota' in html and '.dark-mode .over-quota' in html
+        # the styles moved from the inline <style> (Tailwind CDN) to the local static/css/app.css; the
+        # over-limit marker now uses theme variables, so the dark theme needs no extra .over-quota rule
+        assert '/static/css/app.css' in html and 'cdn.tailwindcss.com' not in html
+        css = client.get('/static/css/app.css').get_data(as_text=True)
+        assert '.over-quota' in css and '.dark-mode' in css
 
     def test_script_sorts_history_and_marks_over_quota(self, client):
         js = client.get('/static/js/app.js').get_data(as_text=True)

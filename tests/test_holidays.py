@@ -87,7 +87,7 @@ class TestHolidaysAreEnforced:
     @pytest.mark.parametrize('jahr,monat,soll', [
         (2026, 4, 160.0),   # 22 Werktage - Karfreitag - Ostermontag
         (2026, 5, 144.0),   # 21 Werktage - 1. Mai - Himmelfahrt - Pfingstmontag
-        (2026, 12, 176.0),  # 23 Werktage - 25.12.
+        (2026, 12, 164.0),  # 23 Werktage - 25.12. - 24.12. (frei) - halber 31.12.
         (2027, 5, 144.0),   # 21 Werktage - Himmelfahrt - Pfingstmontag - Fronleichnam (1. Mai ist Samstag)
     ])
     def test_monthly_target_hours_exclude_holidays(self, jahr, monat, soll):
