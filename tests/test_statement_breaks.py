@@ -31,6 +31,18 @@ def test_gap_between_bookings_counts_as_break():
     assert statement_break_minutes(minutes(10), gap_minutes=30) == 15
 
 
+def test_booking_over_six_hours_keeps_a_minimum_break_despite_a_gap():
+    """A booking longer than 6 h is worked without a break: the gap does not replace the 30 min."""
+    assert statement_break_minutes(minutes(9), gap_minutes=45, longest_block_minutes=minutes(7)) == 30
+    assert statement_break_minutes(minutes(9), gap_minutes=45, longest_block_minutes=minutes(6)) == 0
+    # the required break itself is the cap of the minimum (a 9 h 32 min day needs 32 min, not more than 30)
+    assert statement_break_minutes(minutes(9, 32), gap_minutes=45, longest_block_minutes=minutes(7, 27)) == 30
+    # a gap longer than the missing part never lowers the minimum below the required break
+    assert statement_break_minutes(minutes(6, 10), gap_minutes=60, longest_block_minutes=minutes(6, 5)) == 10
+    # without a long booking the old rule stays
+    assert statement_break_minutes(minutes(8), gap_minutes=10, longest_block_minutes=minutes(5)) == 20
+
+
 class TestAssignBreaks:
     def test_single_session(self):
         assert assign_statement_breaks([('08:00', '17:00')]) == [30.0]
@@ -40,6 +52,12 @@ class TestAssignBreaks:
 
     def test_split_day_with_short_gap_deducts_the_rest_from_the_longest_session(self):
         assert assign_statement_breaks([('08:00', '11:00'), ('11:10', '17:00')]) == [0.0, 20.0]
+
+    def test_split_day_with_a_booking_over_six_hours_loses_thirty_minutes_despite_the_gap(self):
+        assert assign_statement_breaks([('08:00', '10:00'), ('10:45', '18:00')]) == [0.0, 30.0]
+
+    def test_split_day_with_a_booking_of_exactly_six_hours_keeps_the_gap_rule(self):
+        assert assign_statement_breaks([('08:00', '10:00'), ('10:45', '16:45')]) == [0.0, 0.0]
 
     def test_order_of_the_input_does_not_matter(self):
         assert assign_statement_breaks([('12:00', '17:00'), ('08:00', '11:00')]) == [0.0, 0.0]

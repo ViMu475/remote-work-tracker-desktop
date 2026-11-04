@@ -157,11 +157,13 @@ def calculate_net_hours(start_time: str, end_time: str, pause_minutes: float):
         'pause_warning': pause_warning_de
     }
 
-def statement_break_minutes(work_minutes: int, gap_minutes: int = 0) -> int:
+def statement_break_minutes(work_minutes: int, gap_minutes: int = 0, longest_block_minutes: int = 0) -> int:
     """Minutes the time system deducts from the booked time of ONE day (derived from real statements).
 
     Required break: none up to 6 h; above 6 h 30 min, but never below 6 h net; above 9 h 45 min, but
-    never below 9 h net. Gaps between the day's bookings already count as break.
+    never below 9 h net. Gaps between the day's bookings already count as break, with one exception:
+    a single booking longer than 6 h (`longest_block_minutes`) is worked without a break, so the day
+    still loses at least 30 min (or the whole required break if that is less) however long the gap is.
     """
     if work_minutes <= 360:
         required = 0
@@ -171,7 +173,8 @@ def statement_break_minutes(work_minutes: int, gap_minutes: int = 0) -> int:
         required = 30
     else:
         required = min(45, work_minutes - 540)
-    return max(0, required - max(0, gap_minutes))
+    floor = min(required, 30) if longest_block_minutes > 360 else 0
+    return max(floor, required - max(0, gap_minutes))
 
 
 def assign_statement_breaks(sessions):
@@ -190,7 +193,8 @@ def assign_statement_breaks(sessions):
     ordered = sorted(spans)
     work = sum(e - s for s, e in ordered)
     gaps = sum(max(0, ordered[i + 1][0] - ordered[i][1]) for i in range(len(ordered) - 1))
-    deduction = statement_break_minutes(work, gaps)
+    longest_block = max(e - s for s, e in spans)
+    deduction = statement_break_minutes(work, gaps, longest_block)
     longest = max(range(len(spans)), key=lambda i: (spans[i][1] - spans[i][0], -i))
     return [float(deduction) if i == longest else 0.0 for i in range(len(spans))]
 
