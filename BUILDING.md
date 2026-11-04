@@ -45,6 +45,22 @@ Result: `dist/RemoteWorkTracker` (about 40 MB, runs on Linux systems with a simi
 machine). Start it with `./dist/RemoteWorkTracker`; the browser opens, the state file `tracker_state.json` is created
 next to the program.
 
+## Linux packages (.deb and .rpm)
+
+From the finished Linux program `packaging/linux/build-packages.sh` builds a Debian/Ubuntu package and an RPM for
+Fedora/RHEL/openSUSE:
+
+```bash
+sudo apt install fakeroot rpm            # dpkg-deb comes with Debian/Ubuntu; rpmbuild is in the package "rpm"
+packaging/linux/build-packages.sh dist/RemoteWorkTracker 1.1.1 dist-packages
+```
+
+Result: `remote-work-tracker_<version>_amd64.deb` and `remote-work-tracker-<version>-1.x86_64.rpm`. Both install the
+program to `/opt/remote-work-tracker`, a start command `remote-work-tracker`, a menu entry and an icon. The start
+command keeps the state file in the user's own folder (`~/.local/share/remote-work-tracker/tracker_state.json`),
+because `/opt` is not writable for normal users. The packages need a glibc at least as new as the one of the build
+machine (the GitHub build uses an older Ubuntu, so its packages run on more systems). They are not signed.
+
 ## Windows EXE on Windows
 
 Install Python 3.10 or newer from python.org (tick "py launcher"), then in the project folder:
@@ -62,7 +78,7 @@ SmartScreen may warn about an unsigned program ("More info" → "Run anyway"); s
 
 The workflow [`.github/workflows/build-desktop.yml`](.github/workflows/build-desktop.yml) does, on an Ubuntu and a Windows runner: privacy check →
 tests → PyInstaller → smoke test → upload of the program as an artifact (`RemoteWorkTracker-Linux`,
-`RemoteWorkTracker-Windows`).
+`RemoteWorkTracker-Windows`). The Linux job also builds the `.deb` and `.rpm` (artifact `RemoteWorkTracker-Linux-packages`).
 
 It runs on every push and pull request to `main`. Pushing workflow files needs a Git token with the `workflow`
 scope (`gh auth refresh -s workflow`). To run it manually use *Actions → Build desktop apps → Run workflow*, then download

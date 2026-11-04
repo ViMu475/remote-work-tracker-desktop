@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Remote Work Tracker
+GenericName=Working time and remote quota
+Comment=Track working hours and the remote work quota (local web app)
+Exec=remote-work-tracker
+Icon=remote-work-tracker
+Terminal=true
+Categories=Office;
