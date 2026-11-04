@@ -11,7 +11,7 @@ imported, names, addresses, personnel numbers and e-mail addresses). This reposi
 | Screenshots and images, CSV/Excel/Word exports | show real working times or addresses | `.gitignore`, privacy guard |
 | `tracker_state*.json`, backups (`remote_tracker_backup*`, `daily_records_*`) | the person's working times | `.gitignore`, privacy guard |
 | `.env` (contains `GOOGLE_API_KEY`) | secret | `.gitignore`, privacy guard |
-| Private documentation (`docs/`), `.mcp.json`, `.claude/` | local paths, user names, PDFs | `.gitignore` |
+| Private documentation (`docs/`), `.mcp.json` | local paths, user names, PDFs | `.gitignore` |
 | Real statements for local testing | personal data | put them in `tests/real_statements/` (ignored by Git); the tests use them only if present |
 
 **All test data is fictional** (invented dates, times and names). The PDF import tests generate their PDFs on the fly from

@@ -16,7 +16,6 @@ daily_records_*
 .env
 .env.*
 .mcp.json
-.claude/
 # the project's private documentation folder (manuals, protocols; contains local paths and PDFs)
 docs/
 

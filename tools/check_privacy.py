@@ -18,7 +18,7 @@ import re
 import sys
 
 SKIP_DIRS = {'.git', 'venv', '.venv', '.venv-build', 'build', 'dist', 'node_modules', '__pycache__',
-             '.pytest_cache', 'real_statements', '.idea', '.claude'}
+             '.pytest_cache', 'real_statements', '.idea'}
 SELF = {'check_privacy.py', 'test_repo_hygiene.py'}   # contain the patterns / sample strings on purpose
 
 FORBIDDEN_SUFFIXES = {'.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff', '.webp', '.heic',
