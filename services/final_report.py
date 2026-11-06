@@ -10,6 +10,8 @@ Capacitor and React apps), so a result looks the same everywhere:
 """
 from config import Config
 from services.calculation import get_quartal_for_month
+from services.flex_service import status as flex_status
+from services.flex_service import summarize as flex_summary
 
 GOOD = 'good'
 TIGHT = 'tight'
@@ -69,12 +71,15 @@ def _quote(remote, soll):
     return remote / soll * 100 if soll > 0 else 0.0
 
 
-def _month_row(m):
+def _month_row(m, flex=None):
+    """One month of the report. `flex`: the flextime entry of that month (flex_service) or None."""
     remote, limit, soll = _num(m, 'ist_remote_stunden_laufend'), _num(m, 'max_remote_stunden'), _num(m, 'soll_stunden_gesamt')
+    flex = flex or {}
     return {
         'monat': m.get('monat'), 'jahr': m.get('jahr'), 'quote': _num(m, 'individuelle_quote'),
         'remote': remote, 'max_remote': limit, 'soll': soll, 'gesamt': _num(m, 'ist_arbeitszeit_laufend'),
         'actual_quote': _quote(remote, soll), 'over': is_over_quota(m),
+        'flex_total': flex.get('gesamt'), 'flex_change': flex.get('aktuell'), 'flex_status': flex_status(flex.get('gesamt')),
     }
 
 
@@ -90,15 +95,30 @@ def _quartal_key(label):
         return (0, 0)
 
 
-def build_final_report(history):
+def _flex_lookup(flex_series):
+    return {(e['jahr'], e['monat']): e for e in flex_series or [] if isinstance(e, dict) and 'jahr' in e and 'monat' in e}
+
+
+def _quarter_flex(rows):
+    """(balance at the end of the quarter, change during the quarter) from the months that have flextime data."""
+    totals = [r['flex_total'] for r in rows if r['flex_total'] is not None]
+    changes = [r['flex_change'] for r in rows if r['flex_change'] is not None]
+    return (totals[-1] if totals else None), (round(sum(changes), 2) if changes else None)
+
+
+def build_final_report(history, flex_series=None):
+    """The quarterly report. `flex_series` (flex_service.series) adds the flextime per month and quarter and
+    the whole series for the trend chart; without it the flextime values are None / empty."""
     seen = set()
     groups = {}
+    flex_by_month = _flex_lookup(flex_series)
     for m in sort_history(history):
         ident = (m.get('monat'), m.get('jahr'))
         if ident in seen:
             continue
         seen.add(ident)
-        groups.setdefault(_quartal_label(m), []).append(_month_row(m))
+        number = Config.MONATS_NUMMERN.get(m.get('monat')) if isinstance(m.get('monat'), str) else None
+        groups.setdefault(_quartal_label(m), []).append(_month_row(m, flex_by_month.get((m.get('jahr'), number))))
 
     quarters = []
     for label in sorted(groups, key=_quartal_key):
@@ -106,8 +126,10 @@ def build_final_report(history):
         remote = sum(r['remote'] for r in rows)
         limit = sum(r['max_remote'] for r in rows)
         soll = sum(r['soll'] for r in rows)
+        flex_end, flex_change = _quarter_flex(rows)
         quarters.append({
-            'quartal': label, 'months': rows,
+            'quartal': label, 'months': rows, 'flex_end': flex_end, 'flex_change': flex_change,
+            'flex_status': flex_status(flex_end),
             'month_count': len(rows), 'complete': len(rows) >= MIN_MONTHS_FOR_COMPLETE_QUARTER,
             'remote': remote, 'max_remote': limit, 'soll': soll, 'gesamt': sum(r['gesamt'] for r in rows),
             'actual_quote': _quote(remote, soll), 'months_over': sum(1 for r in rows if r['over']),
@@ -123,4 +145,5 @@ def build_final_report(history):
         'remote': remote, 'max_remote': limit, 'soll': soll, 'actual_quote': _quote(remote, soll),
         'rating': rate(remote, limit) if quarters else None,
     }
-    return {'quarters': quarters, 'overall': overall}
+    flex = [e for e in flex_series or [] if isinstance(e, dict)]
+    return {'quarters': quarters, 'overall': overall, 'flex': {'series': flex, 'summary': flex_summary(flex)}}

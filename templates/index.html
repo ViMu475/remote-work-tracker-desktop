@@ -28,6 +28,7 @@
         <main>
         <div class="mb-6 flex flex-wrap items-start gap-3">
             <button type="button" onclick="openDialog('pdf-import-modal')" class="btn btn-primary"><span aria-hidden="true">📄</span><span data-i18n="pdf_import">PDF Import</span></button>
+            <button type="button" onclick="openDialog('batch-import-modal')" class="btn btn-primary"><span aria-hidden="true">🗂️</span><span data-i18n="batch_import_btn">Mehrere Nachweise</span></button>
             <details class="menu" id="export-menu">
                 <summary class="btn btn-outline" aria-label="Export und Backup"><span aria-hidden="true">⬇️</span><span data-i18n="export_menu">Export und Backup</span><span aria-hidden="true">▾</span></summary>
                 <div class="menu-panel">
@@ -58,6 +59,24 @@
                 <button type="button" onclick="closePdfModal()" class="btn btn-outline flex-1" data-i18n="cancel">Abbrechen</button>
             </div>
             <button type="button" onclick="handlePdfImport()" id="pdf-import-btn" style="display: none;" class="btn btn-success w-full mt-2" data-i18n="import_sessions">Importieren</button>
+            <div class="toast-region" aria-live="polite"></div>
+        </dialog>
+
+        <!-- Import of several time statements -->
+        <dialog id="batch-import-modal" class="dlg" style="width:min(96vw,56rem)" aria-labelledby="batch-import-title" onclose="resetBatchModal()">
+            <h2 id="batch-import-title" class="text-2xl font-bold mb-4" data-i18n="batch_import">Mehrere Zeitnachweise importieren</h2>
+            <p class="muted mb-4" data-i18n="batch_import_desc">Laden Sie mehrere Zeitnachweise (PDF) auf einmal.</p>
+
+            <label for="batch-file-input" class="field-label" data-i18n="batch_files">PDF-Dateien</label>
+            <input type="file" id="batch-file-input" accept=".pdf" multiple class="field mb-4">
+
+            <div id="batch-reports" class="space-y-2 mb-4 overflow-y-auto" style="max-height:50vh"></div>
+
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="batch-analyze-btn" onclick="handleBatchAnalyze()" class="btn btn-primary flex-1" data-i18n="batch_analyze">Prüfen</button>
+                <button type="button" onclick="closeBatchModal()" class="btn btn-outline flex-1" data-i18n="batch_close">Schließen</button>
+            </div>
+            <button type="button" id="batch-import-btn" onclick="handleBatchImport()" style="display: none;" class="btn btn-success w-full mt-2"></button>
             <div class="toast-region" aria-live="polite"></div>
         </dialog>
 
@@ -183,7 +202,10 @@
             <section class="section" aria-labelledby="history-title">
                 <div class="flex flex-wrap justify-between items-center gap-2 mb-4 pb-2" style="border-bottom: 1px solid var(--border)">
                     <h2 id="history-title" class="text-xl font-extrabold" data-i18n="history">Historie</h2>
-                    <button type="button" onclick="handleFinalReport()" id="btn-final-report" class="btn btn-primary btn-sm" data-i18n="final_report">Abschlussbericht</button>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="handleFlexChart()" id="btn-flex-chart" class="btn btn-outline btn-sm" data-i18n="flex_title">Gleitzeit-Verlauf</button>
+                        <button type="button" onclick="handleFinalReport()" id="btn-final-report" class="btn btn-primary btn-sm" data-i18n="final_report">Abschlussbericht</button>
+                    </div>
                 </div>
                 <ul id="history-list" class="divider">
                     <li class="p-2 text-sm muted">Keine Monate abgeschlossen</li>
@@ -206,6 +228,15 @@
             </div>
         </div>
         <div id="final-report-body"></div>
+        <div class="toast-region" aria-live="polite"></div>
+    </dialog>
+
+    <dialog id="flex-chart-modal" class="dlg" style="width:min(96vw,56rem)" aria-labelledby="flex-chart-title">
+        <div class="flex flex-wrap justify-between items-center gap-2 mb-4 pb-2" style="border-bottom: 1px solid var(--border)">
+            <h2 id="flex-chart-title" class="text-xl font-extrabold" data-i18n="flex_title">Gleitzeit-Verlauf</h2>
+            <button type="button" onclick="closeFlexChart()" id="flex-chart-close" class="btn btn-neutral btn-sm" data-i18n="close">Schließen</button>
+        </div>
+        <div id="flex-chart-body"></div>
         <div class="toast-region" aria-live="polite"></div>
     </dialog>
 

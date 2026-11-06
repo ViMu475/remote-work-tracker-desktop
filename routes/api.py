@@ -21,7 +21,14 @@ from services.calculation import (
 )
 from services.pdf_service import PDFService
 from services.report_service import ReportService
+from services import flex_analysis, flex_service
 from services.final_report import build_final_report, normalize_history, sort_history
+from services.statement_import import (
+    annotate_with_state, apply_batch, clean_flex_balance, failed_report, review_batch, review_statement
+)
+from services.history_service import (
+    build_month_record, month_has_entries, month_prefix, update_quarter_summary
+)
 from config import Config
 
 api = Blueprint('api', __name__)
@@ -36,7 +43,7 @@ _state_lock = threading.RLock()
 
 @api.before_request
 def _serialize_state_access():
-    if request.endpoint == 'api.analyze_pdf':   # does not touch the state; parsing may take a while
+    if request.endpoint in ('api.analyze_pdf', 'api.analyze_pdf_batch'):   # parsing may take a while
         return
     _state_lock.acquire()
     g._state_lock_held = True
@@ -204,22 +211,7 @@ def analyze_pdf():
         if scratch_dir:
             shutil.rmtree(scratch_dir, ignore_errors=True)
 
-def _clean_flex_balance(raw):
-    """Flextime balance from a statement, validated: only known numeric fields are kept."""
-    if not isinstance(raw, dict):
-        return None
-    out = {}
-    for key in ('previous', 'current', 'total'):
-        value = raw.get(key)
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) < 10000:
-            out[key] = round(float(value), 2)
-    if not out:
-        return None
-    for key in ('year', 'month'):
-        value = raw.get(key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            out[key] = value
-    return out
+_clean_flex_balance = clean_flex_balance
 
 
 @api.route('/pdf/import', methods=['POST'])
@@ -332,6 +324,7 @@ def import_pdf_sessions():
     flex = _clean_flex_balance(data.get('flex_balance'))
     if flex:
         state['gleitzeit_saldo'] = flex
+        flex_service.record_flex(state, flex)
 
     state_service.recalc_monthly_totals(state)
     state_service.save_state(state)
@@ -350,6 +343,80 @@ def import_pdf_sessions():
         'errors': errors,
         'state': state
     })
+
+MAX_BATCH_FILES = 36                      # three years of monthly statements
+MAX_BATCH_MONTHS = 120
+MAX_STATEMENT_BYTES = 10 * 1024 * 1024
+
+
+@api.route('/pdf/batch/analyze', methods=['POST'])
+def analyze_pdf_batch():
+    """Analyse and review several statements at once. Nothing is saved; the statements stay on this computer."""
+    files = [f for f in request.files.getlist('files') if f.filename]
+    if not files:
+        return jsonify({'success': False, 'message': 'Keine Datei ausgewählt'}), 400
+    if len(files) > MAX_BATCH_FILES:
+        return jsonify({'success': False, 'message': f'Höchstens {MAX_BATCH_FILES} Dateien auf einmal'}), 400
+
+    reports = []
+    scratch_dir = tempfile.mkdtemp(prefix='rw_batch_', dir=tempfile.gettempdir())
+    try:
+        for index, file in enumerate(files):
+            name = secure_filename(file.filename) or 'upload.pdf'
+            if not file.filename.lower().endswith('.pdf'):
+                reports.append(failed_report(file.filename, 'not_pdf'))
+                continue
+            try:
+                # one folder per file: the parser reads the period from the file name as a fallback
+                folder = os.path.join(scratch_dir, str(index))
+                os.makedirs(folder)
+                path = os.path.join(folder, name if name.lower().endswith('.pdf') else name + '.pdf')
+                file.save(path)
+                if os.path.getsize(path) > MAX_STATEMENT_BYTES:
+                    reports.append(failed_report(file.filename, 'file_too_large'))
+                    continue
+                # allow_ai=False: a statement is never sent to an external service by the batch import
+                reports.append(review_statement(pdf_service.analyze_pdf(path, allow_ai=False), file.filename))
+            except Exception as e:
+                print(f"ERROR in analyze_pdf_batch ({file.filename}): {e}")
+                reports.append(failed_report(file.filename, 'parse_failed', str(e)[:200]))
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
+
+    review_batch(reports)
+    state = state_service.load_state()
+    for report in reports:
+        annotate_with_state(report, state)
+    reports.sort(key=lambda r: (r['key'] is None, r['key'] or '', r['filename']))
+    return jsonify({'success': True, 'reports': reports})
+
+
+@api.route('/pdf/batch/import', methods=['POST'])
+def import_pdf_batch():
+    """Import the confirmed months. Each month is imported completely or not at all."""
+    data = _json_body()
+    months = data.get('months')
+    if not isinstance(months, list) or not months:
+        return jsonify({'success': False, 'message': 'Keine Monate zum Importieren'}), 400
+    if len(months) > MAX_BATCH_MONTHS:
+        return jsonify({'success': False, 'message': f'Höchstens {MAX_BATCH_MONTHS} Monate auf einmal'}), 400
+
+    state = state_service.load_state()
+    results = apply_batch(state, months)
+    imported = sum(1 for r in results if r['status'] == 'imported')
+    rejected = len(results) - imported
+    if imported:
+        state_service.recalc_monthly_totals(state)
+        if not state_service.save_state(state):
+            return jsonify({'success': False, 'message': 'Speichern fehlgeschlagen, nichts wurde übernommen'}), 500
+
+    if state.get('language', 'de') == 'de':
+        message = f"{imported} Monate importiert" + (f", {rejected} abgelehnt" if rejected else '')
+    else:
+        message = f"{imported} months imported" + (f", {rejected} rejected" if rejected else '')
+    return jsonify({'success': True, 'message': message, 'imported_count': imported,
+                    'rejected_count': rejected, 'results': results, 'state': state})
+
 
 @api.route('/delete/<entry_id>', methods=['DELETE'])
 def delete_record(entry_id):
@@ -553,21 +620,13 @@ def switch_month():
         next_month = month_names[closing_index + 1]
         next_year = closing_year
 
-    state_service.recalc_monthly_totals(state)
-    completed_month = state['current_month_data'].copy()
-
-    soll_gesamt = completed_month.get('soll_stunden_gesamt', 0)
-    ist_remote = completed_month.get('ist_remote_stunden_laufend', 0)
-    tatsaechliche_remote_quote = (ist_remote / soll_gesamt * 100) if soll_gesamt > 0 else 0
-    completed_month['tatsaechliche_remote_quote'] = tatsaechliche_remote_quote
-
-    completed_month['quartal'] = get_quartal_for_month(closing_month, closing_year)
+    completed_month = build_month_record(state, closing_month, closing_year)
 
     # Close ONLY the viewed month: its entries leave the daily records, entries of every other
     # month stay. A month already in the history is not added twice: it is updated when it still
     # has entries (e.g. a statement was loaded again), otherwise the saved snapshot is kept.
-    prefix = f"{closing_year}-{Config.MONATS_NUMMERN[closing_month]:02d}-"
-    has_entries = any(k.startswith(prefix) and v for k, v in state.get('daily_records', {}).items())
+    prefix = month_prefix(closing_month, closing_year)
+    has_entries = month_has_entries(state, closing_month, closing_year)
     history = state['monatliche_historie']
     existing = next((i for i, m in enumerate(history)
                      if m.get('monat') == closing_month and m.get('jahr') == closing_year), None)
@@ -589,25 +648,12 @@ def switch_month():
 
     if history_changed and (closing_month == quartal_monate[-1] if quartal_monate else False):
         abgeschlossenes_quartal = completed_month['quartal']
-        quartal_historie = [m for m in state['monatliche_historie']
-                           if m.get('quartal') == abgeschlossenes_quartal]
+        summary = update_quarter_summary(state['monatliche_historie'], abgeschlossenes_quartal)
 
-        if len(quartal_historie) >= 3:
-            def total(key):      # a damaged history entry counts as 0 instead of breaking the month close
-                return sum(_safe_number(m.get(key)) for m in quartal_historie)
-
-            gesamt_soll = total('soll_stunden_gesamt')
-            gesamt_ist_remote = total('ist_remote_stunden_laufend')
-            gesamt_ist_arbeitszeit = total('ist_arbeitszeit_laufend')
-
-            monthly_quotes = [_safe_number(m.get('tatsaechliche_remote_quote')) for m in quartal_historie]
-            quartal_quote = sum(monthly_quotes) / len(monthly_quotes) if monthly_quotes else 0
-
-            for m in quartal_historie:
-                m['quartal_quote'] = quartal_quote
-                m['quartal_remote'] = gesamt_ist_remote
-                m['quartal_gesamt'] = gesamt_ist_arbeitszeit
-                m['quartal_soll'] = gesamt_soll
+        if summary:
+            quartal_historie = summary['months']
+            gesamt_soll = summary['gesamt_soll']
+            gesamt_ist_remote = summary['gesamt_ist_remote']
 
             aktuelle_quote = _safe_number(quartal_historie[0].get('individuelle_quote'), state['individuelle_quote_prozent'])
             gesamt_max_remote = gesamt_soll * (aktuelle_quote / 100.0)
@@ -670,7 +716,23 @@ def set_view_month():
 def final_report():
     """Quarterly final report over the closed months (see services/final_report.py)."""
     state = state_service.load_state()
-    return jsonify({'success': True, 'report': build_final_report(state.get('monatliche_historie', []))})
+    entries = flex_service.series(state)
+    report = build_final_report(state.get('monatliche_historie', []), entries)
+    latest = next((e for e in reversed(entries) if 'gesamt' in e), None)
+    latest_analysis = flex_analysis.analyze_month(state, latest['jahr'], latest['monat']) if latest else None
+    report['flex']['advice'] = flex_analysis.advice(state, entries=entries, analysis=latest_analysis)
+    report['flex']['limits'] = {'yellow': flex_service.YELLOW_LIMIT, 'red': flex_service.RED_LIMIT,
+                                'target': flex_analysis.TARGET_BUFFER}
+    return jsonify({'success': True, 'report': report})
+
+
+@api.route('/flex/month/<int:year>/<int:month>', methods=['GET'])
+def flex_month_analysis(year, month):
+    """Detailed analysis of one month: days, weeks, signs of overtime, statement numbers (services/flex_analysis.py)."""
+    if not (1 <= month <= 12 and 1900 <= year <= 2200):
+        return jsonify({'success': False, 'message': 'Ungültiger Monat'}), 400
+    state = state_service.load_state()
+    return jsonify({'success': True, 'analysis': flex_analysis.analyze_month(state, year, month)})
 
 @api.route('/export/daily_csv', methods=['GET'])
 def export_daily_csv():
@@ -840,6 +902,7 @@ def restore_state():
             new_state['gleitzeit_saldo'] = flex
         else:
             del new_state['gleitzeit_saldo']
+    new_state['gleitzeit_verlauf'] = flex_service.normalize_series(new_state.get('gleitzeit_verlauf'))  # older backups: empty
     try:
         state_service.recalc_monthly_totals(new_state)  # a backup may carry stale totals
     except Exception:
@@ -876,6 +939,7 @@ def delete_month_from_history(month_name: str, year: int):
     ]
 
     if len(state['monatliche_historie']) < original_length:
+        flex_service.remove_month(state, year, month_name)      # its point leaves the flextime chart as well
         state_service.save_state(state)
         msg = f'Monat {month_name} {year} wurde gelöscht' if lang == 'de' else f'Month {month_name} {year} has been deleted'
         return jsonify({'success': True, 'message': msg, 'state': state})
@@ -892,8 +956,10 @@ def clear_all_history():
     # Count before clearing
     history_count = len(state.get('monatliche_historie', []))
 
-    # Clear history
+    # Clear history (and the flextime series that belongs to it)
     state['monatliche_historie'] = []
+    state['gleitzeit_verlauf'] = []
+    state.pop('gleitzeit_saldo', None)      # the latest balance would bring one point of the chart back
 
     # Clear daily records
     state['daily_records'] = {}

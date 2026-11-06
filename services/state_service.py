@@ -30,6 +30,7 @@ class StateService:
             'dark_mode': False,
             'language': 'de',
             'monatliche_historie': [],
+            'gleitzeit_verlauf': [],
             'daily_records': {},
             'current_month_data': {
                 'monat': current_month,
@@ -59,6 +60,8 @@ class StateService:
                         state['daily_records'] = {}
                     if not isinstance(state.get('monatliche_historie'), list):
                         state['monatliche_historie'] = []
+                    if not isinstance(state.get('gleitzeit_verlauf'), list):
+                        state['gleitzeit_verlauf'] = []
                     if not isinstance(state['daily_records'], dict):
                         state['daily_records'] = {}
                     # numbers the calculations rely on: fall back to the defaults when damaged
@@ -155,6 +158,10 @@ class StateService:
     def calculate_quartal_totals(self, state):
         current_quartal = state.get('current_quartal', 'Q4/2025')
         quartal_monate = Config.QUARTALS_PLANUNG.get(current_quartal, [])
+        try:   # 'Q4/2026' -> 2026: entries of the same months in OTHER years (kept imports) do not count
+            quartal_jahr = int(str(current_quartal).split('/')[1])
+        except (IndexError, ValueError):
+            quartal_jahr = None
 
         quartal_remote = 0.0
         quartal_gesamt = 0.0
@@ -169,7 +176,7 @@ class StateService:
                     date_obj = datetime.strptime(date_key, '%Y-%m-%d')
                     monat_name = month_names_de[date_obj.month - 1]
 
-                    if monat_name in quartal_monate:
+                    if monat_name in quartal_monate and (quartal_jahr is None or date_obj.year == quartal_jahr):
                         if isinstance(val, list):
                             for r in val:
                                 try:

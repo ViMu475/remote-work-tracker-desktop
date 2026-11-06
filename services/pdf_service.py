@@ -53,11 +53,12 @@ class PDFService:
         else:
             print("INFO: Gemini not configured. Using local PDF parsing (pdfplumber).")
 
-    def analyze_pdf(self, pdf_path):
+    def analyze_pdf(self, pdf_path, allow_ai=True):
         """
         Analyze PDF and extract work sessions.
         First tries local pdfplumber parsing for SAP TimeStatements.
         Falls back to Gemini AI if local parsing fails or finds no sessions.
+        `allow_ai=False` keeps the document on this computer: the batch import never sends statements out.
         """
         # Try local parsing first (faster, no API needed)
         if PDFPLUMBER_AVAILABLE:
@@ -67,11 +68,11 @@ class PDFService:
             print(f"Local parsing found no sessions, trying Gemini...")
 
         # Fall back to Gemini if available
-        if self.model:
+        if self.model and allow_ai:
             return self._analyze_with_gemini(pdf_path)
 
         # No method available
-        if not PDFPLUMBER_AVAILABLE and not self.model:
+        if not PDFPLUMBER_AVAILABLE and not (self.model and allow_ai):
             return {
                 "success": False,
                 "message": "No PDF parsing method available. Install pdfplumber or configure Google API Key.",
@@ -96,6 +97,8 @@ class PDFService:
             sessions = []
             year = None
             month = None
+            period_source = None     # 'header' | 'filename' | 'unrecognized' | 'fallback_now': how reliable year/month are
+            period_end = None        # ISO date of the header range end, when the header has one
 
             print(f"DEBUG: Opening PDF file: {pdf_path}")
             with pdfplumber.open(pdf_path) as pdf:
@@ -107,16 +110,20 @@ class PDFService:
             print(f"DEBUG: Extracted {len(full_text)} characters from PDF")
 
             # Extract date range from header (e.g., "from 01.07.2025 to 31.07.2025")
-            date_range_match = re.search(r'from\s+(\d{2})\.(\d{2})\.(\d{4})\s+to\s+\d{2}\.\d{2}\.\d{4}', full_text)
+            date_range_match = re.search(r'from\s+(\d{2})\.(\d{2})\.(\d{4})\s+to\s+(\d{2})\.(\d{2})\.(\d{4})', full_text)
             if date_range_match:
                 month = int(date_range_match.group(2))
                 year = int(date_range_match.group(3))
+                period_source = 'header'
+                period_end = f"{date_range_match.group(6)}-{date_range_match.group(5)}-{date_range_match.group(4)}"
 
             # Also try German format "vom DD.MM.YYYY bis DD.MM.YYYY"
-            date_range_match_de = re.search(r'vom\s+(\d{2})\.(\d{2})\.(\d{4})\s+bis\s+\d{2}\.\d{2}\.\d{4}', full_text, re.IGNORECASE)
+            date_range_match_de = re.search(r'vom\s+(\d{2})\.(\d{2})\.(\d{4})\s+bis\s+(\d{2})\.(\d{2})\.(\d{4})', full_text, re.IGNORECASE)
             if date_range_match_de and not year:
                 month = int(date_range_match_de.group(2))
                 year = int(date_range_match_de.group(3))
+                period_source = 'header'
+                period_end = f"{date_range_match_de.group(6)}-{date_range_match_de.group(5)}-{date_range_match_de.group(4)}"
 
             # Also try "Month: July - 2025" format (English)
             month_year_match = re.search(r'Month:\s+(\w+)\s+-\s+(\d{4})', full_text)
@@ -129,6 +136,9 @@ class PDFService:
                 month_name = month_year_match.group(1)
                 month = month_names.get(month_name, 1)
                 year = int(month_year_match.group(2))
+                # an unknown month name still counts as January here (single import); the batch import
+                # does not trust it
+                period_source = 'header' if month_name in month_names else 'unrecognized'
 
             # Also try German format "Monat: Juli - 2025"
             month_year_match_de = re.search(r'Monat:\s+(\w+)\s+-\s+(\d{4})', full_text, re.IGNORECASE)
@@ -141,14 +151,18 @@ class PDFService:
                 month_name = month_year_match_de.group(1)
                 month = month_names_de.get(month_name, 1)
                 year = int(month_year_match_de.group(2))
+                period_source = 'header' if month_name in month_names_de else 'unrecognized'
 
             if not year or not month:
                 # Try to extract from filename (e.g., TimeStatement_20310701_20310731.pdf)
                 filename_match = re.search(r'(\d{4})(\d{2})(\d{2})', os.path.basename(pdf_path))
-                if filename_match:
+                if filename_match and 1 <= int(filename_match.group(2)) <= 12:
                     year = int(filename_match.group(1))
                     month = int(filename_match.group(2))
+                    period_source = 'filename'
 
+            if not year or not month:
+                period_source = 'fallback_now'   # nothing in the document: the batch import rejects this
             if not year:
                 year = datetime.now().year
             if not month:
@@ -284,6 +298,8 @@ class PDFService:
                     "format": "SAP TimeStatement",
                     "year": year,
                     "month": month,
+                    "period_source": period_source,
+                    "period_end": period_end,
                     "total_sessions": len(sessions),
                     "remote_sessions": remote_count,
                     "office_sessions": office_count

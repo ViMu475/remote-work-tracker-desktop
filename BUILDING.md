@@ -177,6 +177,8 @@ Playwright scripts (not part of pytest) drive the real user interface with ficti
 pip install playwright && playwright install chromium
 RW_APP_PYTHON=python python tests/browser/verify_history_report.py . [screenshot-folder]
 RW_APP_PYTHON=python python tests/browser/verify_view_restore.py .
+pip install reportlab        # the next check makes its fictional statements itself
+RW_APP_PYTHON=python python tests/browser/verify_batch_import.py . [screenshot-folder]
 ```
 
 `RW_APP_PYTHON` is the Python of the environment where Flask is installed (default `python3`).

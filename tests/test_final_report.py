@@ -111,7 +111,7 @@ class TestFinalReportApi:
     def test_endpoint_returns_report_for_stored_history(self, client):
         data = client.get('/api/report/final').get_json()
         assert data['success'] is True
-        assert set(data['report']) == {'quarters', 'overall'}
+        assert set(data['report']) == {'quarters', 'overall', 'flex'}
         hist = client.get('/api/state').get_json()['monatliche_historie']
         assert data['report']['overall']['months'] == len({(m['monat'], m['jahr']) for m in hist})
 

@@ -50,6 +50,9 @@ working directory when run from source).
 - **Final report** by quarter with rating (up to 90 % of the limit good, up to 100 % tight, above exceeded)
 - Quarterly automatic quota adjustment (±10 %), Bavarian holidays 2025–2030
 - Import of SAP time statements (PDF), CSV and PDF monthly report, JSON backup and restore
+- **Import of several statements at once** ("Mehrere Nachweise"): every statement is checked (month, times, overlaps,
+  holidays, long days), only correct months are imported, and a month that is over goes sorted into the history
+  (own quota per month, the global quota is never changed; a month with an error is held back completely)
 - German and English, dark mode
 
 ## Tests
@@ -60,7 +63,7 @@ python -m pytest -q
 python tools/check_privacy.py       # privacy guard, also part of the test suite and of CI
 ```
 
-The suite (about 400 tests) uses only fictional data; tests that need real statements are skipped unless you provide them locally (see PRIVACY.md). Long-running model tests: `RW_SOAK_STEPS=1500
+The suite (more than 1,200 tests) uses only fictional data; tests that need real statements are skipped unless you provide them locally (see PRIVACY.md). Long-running model tests: `RW_SOAK_STEPS=1500
 RW_SOAK_SEEDS=20 python -m pytest tests/test_soak.py -k random_run`. Browser checks (Playwright) are described in
 [BUILDING.md](BUILDING.md#browser-checks).
 

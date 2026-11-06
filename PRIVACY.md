@@ -38,7 +38,8 @@ file that was once committed stays readable in old commits; rewrite the history 
   (used when the local parser finds nothing and `GOOGLE_API_KEY` is set) uploads the PDF to Google's API. That would
   transfer personal data to a third party: leave `GOOGLE_API_KEY` unset unless you have a legal basis and, where needed, a
   data-processing agreement. The prebuilt programs do **not** contain the Gemini code unless built with
-  `RW_BUNDLE_GEMINI=1`.
+  `RW_BUNDLE_GEMINI=1`. The **import of several statements at once** never uses the Gemini fallback: it only reads the
+  PDFs with the local parser (`allow_ai=False`), whatever `GOOGLE_API_KEY` is set to.
 * Deleting the data: delete `tracker_state.json` (or use "delete all" / "clear history" in the program).
 
 ## Rules for contributors
